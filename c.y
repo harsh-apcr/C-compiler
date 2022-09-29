@@ -106,7 +106,7 @@ postfix_expression
 	;
 
 argument_expression_list
-	: assignment_expression							{ $$ = ast_node_create(ARG_EXPR_LIST, "ARG_EXPR_LIST", {$1, NULL});}
+	: assignment_expression							{ $$ = ast_node_create(ARG_EXPR_LIST, "arg_expr_list", {$1, NULL});}
 	| argument_expression_list ',' assignment_expression	{ add_children($1, $3); $$ = $1; }
 	;
 
@@ -218,7 +218,7 @@ assignment_operator
 
 expression
 	: assignment_expression
-	| expression ',' assignment_expression						{ $$ = ast_node_create(ASSIGNCOMMA, ",", {$1, $3, NULL});}
+	| expression ',' assignment_expression						{ $$ = ast_node_create(ASSIGN_COMMA, ",", {$1, $3, NULL});}
 	;
 
 /*
@@ -227,24 +227,24 @@ constant_expression
 	;
 */
 declaration
-	: declaration_specifiers ';'								{ $$ = ast_node_create(DECLARATION, ";", {$1, NULL});}
-	| declaration_specifiers init_declarator_list ';'			{ $$ = ast_node_create(DECLARATION, ";", {$1, $2, NULL}); }
+	: declaration_specifiers ';'								{ $$ = ast_node_create(DECL, "decl", {$1, NULL});}
+	| declaration_specifiers init_declarator_list ';'			{ $$ = ast_node_create(DECL, "decl", {$1, $2, NULL}); }
 //	| static_assert_declaration
 	;
 
-type_name
+/*type_name
 	: declaration_specifiers pointer
 	| declaration_specifiers
 	;
-
+*/
 declaration_specifiers
 	:/* storage_class_specifier declaration_specifiers
 	| storage_class_specifier
 	*/
 	| type_specifier declaration_specifiers		{ add_children($2, $1); $$ = $2;}
-	| type_specifier							{ ast_node_create(DECLSPEC, "DECLSPEC", {$1, NULL});}
+	| type_specifier							{ ast_node_create(DECLSPEC, "decl_spec", {$1, NULL});}
 	| type_qualifier declaration_specifiers		{ add_children($2, $1); $$ = $2;}
-	| type_qualifier							{ ast_node_create(DECLSPEC, "DECLSPEC", {$1, NULL});}
+	| type_qualifier							{ ast_node_create(DECLSPEC, "decl_spec", {$1, NULL});}
 	/*| function_specifier declaration_specifiers
 	| function_specifier
 	| alignment_specifier declaration_specifiers
@@ -252,13 +252,13 @@ declaration_specifiers
 	;
 
 init_declarator_list
-	: init_declarator
-	| init_declarator_list ',' init_declarator
+	: init_declarator								{ $$ = ast_node_create(INIT_DECL_LIST, "init_decl_list", {$1, NULL});}
+	| init_declarator_list ',' init_declarator		{ add_children($1, $3); $$ = $1;}
 	;
 
 init_declarator
-	: declarator '=' initializer
-	| declarator
+	: declarator '=' initializer					{ $$ = ast_node_create(INIT_DECL, "init_decl", {$1, $3, NULL});}
+	| declarator									{ $$ = ast_node_create(INIT_DECL, "init_decl", {$1, NULL});}
 	;
 /*
 storage_class_specifier
@@ -271,16 +271,16 @@ storage_class_specifier
 	;
 */
 type_specifier
-	: VOID
-	| CHAR
-	| SHORT
-	| INT
-	| LONG
-	| FLOAT
-	| DOUBLE
-	| SIGNED
-	| UNSIGNED
-	| BOOL
+	: VOID											{ $$ = ast_node_create(TYPE_VOID, "void", {NULL});}
+	| CHAR											{ $$ = ast_node_create(TYPE_CHAR, "char", {NULL});}
+	| SHORT											{ $$ = ast_node_create(TYPE_SHORT, "short", {NULL});}
+	| INT											{ $$ = ast_node_create(TYPE_INT, "int", {NULL});}
+	| LONG											{ $$ = ast_node_create(TYPE_LONG, "long", {NULL});}
+	| FLOAT											{ $$ = ast_node_create(TYPE_FLOAT, "float", {NULL});}
+	| DOUBLE										{ $$ = ast_node_create(TYPE_DOUBLE, "double", {NULL});}
+	| SIGNED										{ $$ = ast_node_create(TYPE_SIGNED, "signed", {NULL});}
+	| UNSIGNED										{ $$ = ast_node_create(TYPE_UNSIGNED, "unsigned", {NULL});}
+	| BOOL											{ $$ = ast_node_create(TYPE_BOOL, "bool", {NULL});}
 /*	| COMPLEX
 	| IMAGINARY	  	// non-mandated extension
 	| atomic_type_specifier
@@ -354,7 +354,8 @@ atomic_type_specifier
 */
 
 type_qualifier
-	: CONST /*
+	: CONST 				{ $$ = ast_node_create(TYPE_QUAL_CONST, "const", {NULL}); }
+	/*							
 	| RESTRICT
 	| VOLATILE
 	| ATOMIC */
@@ -376,9 +377,9 @@ declarator
 	;
 
 direct_declarator
-	: IDENTIFIER
-	| '(' declarator ')'
-	| direct_declarator '[' ']'
+	: IDENTIFIER						{ $$ = ast_node_create(IDENTIFIER_DECL, "identifier_decl", {ast_node_create(IDENTIFIER, $1, {NULL}), NULL}); }
+	| '(' declarator ')'				{ $$ = $2; }
+/*	| direct_declarator '[' ']'
 	| direct_declarator '[' '*' ']'
 	| direct_declarator '[' STATIC type_qualifier_list assignment_expression ']'
 	| direct_declarator '[' STATIC assignment_expression ']'
@@ -386,39 +387,39 @@ direct_declarator
 	| direct_declarator '[' type_qualifier_list STATIC assignment_expression ']'
 	| direct_declarator '[' type_qualifier_list assignment_expression ']'
 	| direct_declarator '[' type_qualifier_list ']'
-	| direct_declarator '[' assignment_expression ']'
-	| direct_declarator '(' parameter_type_list ')'
-	| direct_declarator '(' ')'
-	| direct_declarator '(' identifier_list ')'
+	| direct_declarator '[' assignment_expression ']' */
+	| direct_declarator '(' parameter_type_list ')'		{ $$ = ast_node_create(FUNCTION_DECL, "function_decl", {$1, $3, NULL}); }
+	| direct_declarator '(' ')'							{ $$ = ast_node_create(FUNCTION_DECL, "function_decl", {$1, NULL}); }
+//	| direct_declarator '(' identifier_list ')'
 	;
 
 pointer
-	: '*' type_qualifier_list pointer
-	| '*' type_qualifier_list
-	| '*' pointer
+	: '*' type_qualifier_list pointer		{ add_children($3, $2); $$ = $3; }
+	| '*' type_qualifier_list				{ $$ = ast_node_create(PTR, "PTR", {$2, NULL}); }
+	| '*' pointer							{ $$ = $2; }
 	| '*'
 	;
 
 type_qualifier_list
-	: type_qualifier
-	| type_qualifier_list type_qualifier
+	: type_qualifier						{ $$ = ast_node_create(TYPE_QUAL_LIST, "type_qual_list", {$1, NULL}); }
+	| type_qualifier_list type_qualifier	{ add_children($1, $2); $$ = $1; }
 	;
 
 
-parameter_type_list
-	: parameter_list ',' ELLIPSIS
+parameter_type_list							
+	: parameter_list ',' ELLIPSIS				{ add_children($1, ast_node_create(ELLIPSIS, $3, {NULL})); $$ = $1; }
 	| parameter_list
 	;
 
 parameter_list
-	: parameter_declaration
-	| parameter_list ',' parameter_declaration
+	: parameter_declaration						{ $$ = ast_node_create(PARAM_LIST, "param_list", {$1, NULL}); }
+	| parameter_list ',' parameter_declaration	{ add_children($1, $3); $$ = $1; }
 	;
 
 parameter_declaration
-	: declaration_specifiers declarator
-	| declaration_specifiers abstract_declarator
-	| declaration_specifiers
+	: declaration_specifiers declarator			{ $$ = ast_node_create(PARAM_DECL, "param_decl", {$1, $2, NULL}); }
+/*	| declaration_specifiers abstract_declarator */
+	| declaration_specifiers					{ $$ = ast_node_create(PARAM_DECL, "param_decl", {$1, NULL});}
 	;
 /*
 identifier_list
@@ -502,29 +503,29 @@ statement
 	;
 
 labeled_statement
-	: IDENTIFIER ':' statement
-	| CASE constant_expression ':' statement
-	| DEFAULT ':' statement
+	: IDENTIFIER ':' statement						{ $$ = ast_node_create(LABELED_STMT, "labeled_stmt", {ast_node_create(IDENTIFIER, $1, {NULL}), $2, NULL}); }
+	| CASE constant_expression ':' statement		{ $$ = ast_node_create(CASE_STMT, "case_stmt", {$2, $4, NULL}); }
+	| DEFAULT ':' statement							{ $$ = ast_node_create(DEF_STMT, "def_stmt", {$3, NULL}); }
 	;
 
 compound_statement
-	: '{' '}'
-	| '{'  block_item_list '}'
+	: '{' '}'										{ $$ = ast_node_create(CMPND_STMT, "cmpnd_stmt", {NULL}); }
+	| '{'  block_item_list '}'						{ $$ = ast_node_create(CMPND_STMT, "cmpnd_stmt", {$2, NULL}); }
 	;
 
 block_item_list
-	: block_item
-	| block_item_list block_item
+	: block_item									{ $$ = ast_node_create(BLK_ITEM_LIST, "blk_item_list", {$1, NULL}); }
+	| block_item_list block_item					{ add_children($1, $2); $$ = $1;}
 	;
 
 block_item
 	: declaration
-	| statement
+	| statement	
 	;
 
 expression_statement
-	: ';'
-	| expression ';'
+	: ';'											{ $$ = ast_node_create(EXPR_STMT, "expr_stmt", {NULL}); }
+	| expression ';'								{ $$ = ast_node_create(EXPR_STMT, "expr_stmt", {$1, NULL}); }
 	;
 /*
 selection_statement
@@ -552,8 +553,8 @@ jump_statement
 */
 
 translation_unit
-	: external_declaration
-	| translation_unit external_declaration
+	: external_declaration							{ $$ = ast_node_create(TRANSLATION_UNIT, "translation_unit", {$1, NULL}); }
+	| translation_unit external_declaration			{ add_children($1, $2); $$ = $1; }
 	;
 
 external_declaration
@@ -562,8 +563,8 @@ external_declaration
 	;
 
 function_definition
-	: declaration_specifiers declarator declaration_list compound_statement
-	| declaration_specifiers declarator compound_statement
+	/* : declaration_specifiers declarator declaration_list compound_statement	// old style definition */
+	: declaration_specifiers declarator compound_statement							{ $$ = ast_node_create(FUNCTION_DEF, "function_def", {$1, $2, $3, NULL});}
 	;
 /*
 declaration_list
