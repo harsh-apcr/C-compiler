@@ -44,7 +44,7 @@ static int check_type(void);
 "break"					{ return(BREAK); }
 "case"					{ return(CASE); }
 "char"					{ return(CHAR); }
-"const"					{ return(CONST); }
+"const"					{ yylval.sval = strdup(yytext); return(CONST); }
 "continue"				{ return(CONTINUE); }
 "default"				{ return(DEFAULT); }
 "do"					{ return(DO); }
@@ -60,7 +60,7 @@ static int check_type(void);
 "int"					{ return(INT); }
 "long"					{ return(LONG); }
 "register"				{ return(REGISTER); }
-"restrict"				{ return(RESTRICT); }
+"restrict"				{ yylval.sval = strdup(yytext); return(RESTRICT); }
 "return"				{ return(RETURN); }
 "short"					{ return(SHORT); }
 "signed"				{ return(SIGNED); }
@@ -72,11 +72,11 @@ static int check_type(void);
 "union"					{ return(UNION); }
 "unsigned"				{ return(UNSIGNED); }
 "void"					{ return(VOID); }
-"volatile"				{ return(VOLATILE); }
+"volatile"				{ yylval.sval = strdup(yytext); return(VOLATILE); }
 "while"					{ return(WHILE); }
 "_Alignas"                              { return ALIGNAS; }
 "_Alignof"                              { return ALIGNOF; }
-"_Atomic"                               { return ATOMIC; }
+"_Atomic"                               { yylval.sval = strdup(yytext); return ATOMIC; }
 "_Bool"                                 { return BOOL; }
 "_Complex"                              { return COMPLEX; }
 "_Generic"                              { return GENERIC; }
@@ -88,19 +88,18 @@ static int check_type(void);
 
 {L}{A}*					{ return check_type(); }
 
-{HP}{H}+{IS}?				{ return I_CONSTANT; }
-{NZ}{D}*{IS}?				{ return I_CONSTANT; }
-"0"{O}*{IS}?				{ return I_CONSTANT; }
-{CP}?"'"([^'\\\n]|{ES})+"'"		{ return I_CONSTANT; }
+{HP}{H}+{IS}?				{ yylval.sval = strdup(yytext); return I_CONSTANT; }
+{NZ}{D}*{IS}?				{ yylval.sval = strdup(yytext); return I_CONSTANT; }
+"0"{O}*{IS}?				{ yylval.sval = strdup(yytext); return I_CONSTANT; }
+{CP}?"'"([^'\\\n]|{ES})+"'"	{ yylval.sval = strdup(yytext); return I_CONSTANT; }
+{D}+{E}{FS}?				{ yylval.sval = strdup(yytext); return F_CONSTANT; }
+{D}*"."{D}+{E}?{FS}?		{ yylval.sval = strdup(yytext); return F_CONSTANT; }
+{D}+"."{E}?{FS}?			{ yylval.sval = strdup(yytext); return F_CONSTANT; }
+{HP}{H}+{P}{FS}?			{ yylval.sval = strdup(yytext); return F_CONSTANT; }
+{HP}{H}*"."{H}+{P}{FS}?		{ yylval.sval = strdup(yytext); return F_CONSTANT; }
+{HP}{H}+"."{P}{FS}?			{ yylval.sval = strdup(yytext); return F_CONSTANT; }
 
-{D}+{E}{FS}?				{ return F_CONSTANT; }
-{D}*"."{D}+{E}?{FS}?			{ return F_CONSTANT; }
-{D}+"."{E}?{FS}?			{ return F_CONSTANT; }
-{HP}{H}+{P}{FS}?			{ return F_CONSTANT; }
-{HP}{H}*"."{H}+{P}{FS}?			{ return F_CONSTANT; }
-{HP}{H}+"."{P}{FS}?			{ return F_CONSTANT; }
-
-({SP}?\"([^"\\\n]|{ES})*\"{WS}*)+	{ return STRING_LITERAL; }
+({SP}?\"([^"\\\n]|{ES})*\"{WS}*)+	{ yylval.sval = strdup(yytext); return STRING_LITERAL; }
 
 "..."					{ return ELLIPSIS; }
 ">>="					{ return RIGHT_ASSIGN; }
@@ -187,6 +186,7 @@ static int check_type(void)
     case ENUMERATION_CONSTANT:        /* previously defined */
         return ENUMERATION_CONSTANT;
     default:                          /* includes undefined */
+        yylval.sval = strdup(yytext);
         return IDENTIFIER;
     }
 }

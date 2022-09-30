@@ -24,5 +24,12 @@ main(int argc, char **argv)
   assert(yyin);
   int ret = yyparse();
   printf("retv = %d\n", ret);
+  if (ret == 0) {
+    printf("-------- ABSTRACT SYNTAX TREE -------\n");
+    struct _ast_node *root_node = get_ast_root();
+    dump_ast(root_node);
+    ast_destroy(root_node);
+  }
+  
   exit(0);
 }
