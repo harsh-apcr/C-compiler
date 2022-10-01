@@ -103,8 +103,8 @@ postfix_expression
 	| postfix_expression '(' argument_expression_list ')'	{ temp[0] = $1;temp[1] = $3;temp[2] = NULL;$$ = ast_node_create(FUNCTION_CALL, "()", temp);}
 /*	| postfix_expression '.' IDENTIFIER
 	| postfix_expression PTR_OP IDENTIFIER	*/
-	| postfix_expression INC_OP								{ temp[0] = $1;temp[1] = NULL;$$ = ast_node_create(POSTINC_OP, "++ post", temp);}
-	| postfix_expression DEC_OP								{ temp[0] = $1;temp[1] = NULL;$$ = ast_node_create(POSTDEC_OP, "-- post", temp);}
+	| postfix_expression INC_OP								{ temp[0] = $1;temp[1] = NULL;$$ = ast_node_create(POSTINC_OP, "++(post)", temp);}
+	| postfix_expression DEC_OP								{ temp[0] = $1;temp[1] = NULL;$$ = ast_node_create(POSTDEC_OP, "-- (post)", temp);}
 /*	| '(' type_name ')' '{' initializer_list '}'
 	| '(' type_name ')' '{' initializer_list ',' '}' */
 	;
@@ -116,8 +116,8 @@ argument_expression_list
 
 unary_expression
 	: postfix_expression
-	| INC_OP unary_expression						{ temp[0] = $2;temp[1] = NULL;$$ = ast_node_create(PREINC_OP, "pre ++", temp);}
-	| DEC_OP unary_expression						{ temp[0] = $2;temp[1] = NULL;$$ = ast_node_create(PREDEC_OP, "pre --", temp);}
+	| INC_OP unary_expression						{ temp[0] = $2;temp[1] = NULL;$$ = ast_node_create(PREINC_OP, "(pre)++", temp);}
+	| DEC_OP unary_expression						{ temp[0] = $2;temp[1] = NULL;$$ = ast_node_create(PREDEC_OP, "(pre)--", temp);}
 	| unary_operator cast_expression				{ add_children($1, $2); $$ = $1; }
 /*	| SIZEOF unary_expression
 	| SIZEOF '(' type_name ')'
@@ -125,12 +125,12 @@ unary_expression
 	;
 
 unary_operator
-	: '&'											{ temp[0]=NULL;$$ = ast_node_create(ADDR_OP, "&", temp);}
-	| '*'											{ temp[0]=NULL;$$ = ast_node_create(DEREF_OP, "*", temp);}
-	| '+'											{ temp[0]=NULL;$$ = ast_node_create(UNPLUS, "+", temp);}
-	| '-'											{ temp[0]=NULL;$$ = ast_node_create(UNMINUS, "-", temp);}
-	| '~'											{ temp[0]=NULL;$$ = ast_node_create(BIT_COMP, "~",temp);}
-	| '!'											{ temp[0]=NULL;$$ = ast_node_create(NOT, "!", temp);}
+	: '&'											{ temp[0]=NULL;$$ = ast_node_create(ADDR_OP, "(&)", temp);}
+	| '*'											{ temp[0]=NULL;$$ = ast_node_create(DEREF_OP, "(*)", temp);}
+	| '+'											{ temp[0]=NULL;$$ = ast_node_create(UNPLUS, "(+)", temp);}
+	| '-'											{ temp[0]=NULL;$$ = ast_node_create(UNMINUS, "(-)", temp);}
+	| '~'											{ temp[0]=NULL;$$ = ast_node_create(BIT_COMP, "(~)",temp);}
+	| '!'											{ temp[0]=NULL;$$ = ast_node_create(NOT, "(!)", temp);}
 	;
 
 cast_expression
@@ -140,64 +140,64 @@ cast_expression
 
 multiplicative_expression
 	: cast_expression
-	| multiplicative_expression '*' cast_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(MULT, "*", temp);}
-	| multiplicative_expression '/' cast_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(DIV, "/", temp);}
-	| multiplicative_expression '%' cast_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(MOD, "\%", temp);}
+	| multiplicative_expression '*' cast_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(MULT, "(*)", temp);}
+	| multiplicative_expression '/' cast_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(DIV, 	"(/)", temp);}
+	| multiplicative_expression '%' cast_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(MOD, 	"(\%)", temp);}
 	;
 
 additive_expression
 	: multiplicative_expression
-	| additive_expression '+' multiplicative_expression			{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(PLUS, "+", temp);}
-	| additive_expression '-' multiplicative_expression			{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(MINUS, "-", temp);}
+	| additive_expression '+' multiplicative_expression			{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(PLUS, "(+)", temp);}
+	| additive_expression '-' multiplicative_expression			{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(MINUS,"(-)", temp);}
 	;
 shift_expression
 	: additive_expression
-	| shift_expression LEFT_OP additive_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(LEFT_SHIFT, "<<", temp);};
-	| shift_expression RIGHT_OP additive_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(RIGHT_SHIFT, ">>", temp);};
+	| shift_expression LEFT_OP additive_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(LEFT_SHIFT, "(<<)", temp);};
+	| shift_expression RIGHT_OP additive_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(RIGHT_SHIFT,"(>>)", temp);};
 	;
 
 relational_expression
 	: shift_expression
-	| relational_expression '<' shift_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(LESS_THAN, "<", temp);}
-	| relational_expression '>' shift_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(GREATER_THAN, ">", temp);}
-	| relational_expression LE_OP shift_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(LESSEQ, "<=", temp);}
-	| relational_expression GE_OP shift_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(GREATEREQ, ">=", temp);}
+	| relational_expression '<' shift_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(LESS_THAN, "(<)", temp);}
+	| relational_expression '>' shift_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(GREATER_THAN, "(>)", temp);}
+	| relational_expression LE_OP shift_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(LESSEQ, "(<=)", temp);}
+	| relational_expression GE_OP shift_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(GREATEREQ, "(>=)", temp);}
 	;
 
 equality_expression
 	: relational_expression
-	| equality_expression EQ_OP relational_expression			{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(EQOP, "==", temp); }
-	| equality_expression NE_OP relational_expression			{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(NEQOP, "!=", temp); }
+	| equality_expression EQ_OP relational_expression			{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(EQOP, "(==)", temp); }
+	| equality_expression NE_OP relational_expression			{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(NEQOP, "(!=)", temp); }
 	;
 
 and_expression
 	: equality_expression										
-	| and_expression '&' equality_expression					{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(BITAND, "&", temp); }
+	| and_expression '&' equality_expression					{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(BITAND, "(&)", temp); }
 	;
 
 exclusive_or_expression
 	: and_expression
-	| exclusive_or_expression '^' and_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(BITXOR, "^", temp); }
+	| exclusive_or_expression '^' and_expression				{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(BITXOR, "(^)", temp); }
 	;
 
 inclusive_or_expression
 	: exclusive_or_expression
-	| inclusive_or_expression '|' exclusive_or_expression		{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(BITOR, "|", temp); }
+	| inclusive_or_expression '|' exclusive_or_expression		{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(BITOR, "(|)", temp); }
 	;
 
 logical_and_expression
 	: inclusive_or_expression
-	| logical_and_expression AND_OP inclusive_or_expression		{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(LAND, "&&", temp);}
+	| logical_and_expression AND_OP inclusive_or_expression		{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(LAND, "(&&)", temp);}
 	;
 
 logical_or_expression
 	: logical_and_expression
-	| logical_or_expression OR_OP logical_and_expression		{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(LOR, "||", temp);}
+	| logical_or_expression OR_OP logical_and_expression		{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(LOR, "(||)", temp);}
 	;
 
 conditional_expression
 	: logical_or_expression
-	| logical_or_expression '?' expression ':' conditional_expression	{ temp[0]=$1;temp[1]=$3;temp[2]=$5;temp[3]=NULL;$$ = ast_node_create(TERNOP, "?:", temp); }
+	| logical_or_expression '?' expression ':' conditional_expression	{ temp[0]=$1;temp[1]=$3;temp[2]=$5;temp[3]=NULL;$$ = ast_node_create(TERNOP, "(? :)", temp); }
 	;
 
 assignment_expression
@@ -206,17 +206,17 @@ assignment_expression
 	;
 
 assignment_operator
-	: '='														{ temp[0]=NULL;$$ = ast_node_create(ASSIGN, "=", temp);}
-	| MUL_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(MULASSIGN, "*=", temp);}
-	| DIV_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(DIVASSIGN, "/=", temp);}
-	| MOD_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(MODASSIGN, "\%=",temp);}
-	| ADD_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(ADDASSIGN, "+=", temp);}
-	| SUB_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(SUBASSIGN, "-=", temp);}
-	| LEFT_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(LEFTASSIGN, "<<=", temp);}
-	| RIGHT_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(RIGHTASSIGN, ">>=",temp);}
-	| AND_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(BITANDASSIGN, "&=",temp);}
-	| XOR_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(BITXORASSIGN, "^=",temp);}
-	| OR_ASSIGN													{ temp[0]=NULL;$$ = ast_node_create(BITORASSIGN, "|=", temp);}	
+	: '='														{ temp[0]=NULL;$$ = ast_node_create(ASSIGN, "(=)", temp);}
+	| MUL_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(MULASSIGN, "(*=)", temp);}
+	| DIV_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(DIVASSIGN, "(/=)", temp);}
+	| MOD_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(MODASSIGN, "(\%=)",temp);}
+	| ADD_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(ADDASSIGN, "(+=)", temp);}
+	| SUB_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(SUBASSIGN, "(-=)", temp);}
+	| LEFT_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(LEFTASSIGN, "(<<=)", temp);}
+	| RIGHT_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(RIGHTASSIGN, "(>>=)",temp);}
+	| AND_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(BITANDASSIGN, "(&=)",temp);}
+	| XOR_ASSIGN												{ temp[0]=NULL;$$ = ast_node_create(BITXORASSIGN, "(^=)",temp);}
+	| OR_ASSIGN													{ temp[0]=NULL;$$ = ast_node_create(BITORASSIGN, "(|=)", temp);}	
 	;
 
 expression
@@ -230,8 +230,8 @@ constant_expression
 	;
 
 declaration
-	: declaration_specifiers ';'								{ temp[0]=$1;temp[1]=NULL;$$ = ast_node_create(DECL, "decl", temp);}
-	| declaration_specifiers init_declarator_list ';'			{ temp[0]=$1;temp[1]=$2;temp[2]=NULL;$$ = ast_node_create(DECL, "decl", temp); }
+	: declaration_specifiers ';'								{ temp[0]=$1;temp[1]=NULL;$$ = ast_node_create(DECL, "declaration", temp);}
+	| declaration_specifiers init_declarator_list ';'			{ temp[0]=$1;temp[1]=$2;temp[2]=NULL;$$ = ast_node_create(DECL, "declaration", temp); }
 //	| static_assert_declaration
 	;
 
@@ -245,9 +245,9 @@ declaration_specifiers
 	| storage_class_specifier
 	*/
 	: type_specifier declaration_specifiers		{ add_children($2, $1); $$ = $2;}
-	| type_specifier							{ temp[0]=$1;temp[1]=NULL;ast_node_create(DECLSPEC, "decl_spec", temp);}
+	| type_specifier							{ temp[0]=$1;temp[1]=NULL;ast_node_create(DECLSPEC, "declaration_spec", temp);}
 	| type_qualifier declaration_specifiers		{ add_children($2, $1); $$ = $2;}
-	| type_qualifier							{ temp[0]=$1;temp[1]=NULL;ast_node_create(DECLSPEC, "decl_spec", temp);}
+	| type_qualifier							{ temp[0]=$1;temp[1]=NULL;ast_node_create(DECLSPEC, "declaration_spec", temp);}
 	/*| function_specifier declaration_specifiers
 	| function_specifier
 	| alignment_specifier declaration_specifiers
@@ -374,7 +374,7 @@ alignment_specifier
 	;
 */
 declarator
-	: pointer direct_declarator			{ temp[0]=$1;temp[1]=$2;temp[2]=NULL;$$ = ast_node_create(DECLARATOR, "declarator", temp); }
+	: pointer direct_declarator			{ temp[0]=$2;temp[1]=$1;temp[2]=NULL;$$ = ast_node_create(DECLARATOR, "declarator", temp); }
 	| direct_declarator					{ temp[0]=$1;temp[1]=NULL;$$ = ast_node_create(DECLARATOR, "declarator", temp); }
 	;
 
@@ -397,9 +397,9 @@ direct_declarator
 
 pointer
 	: '*' type_qualifier_list pointer		{ add_children($3, $2); $$ = $3; }
-	| '*' type_qualifier_list				{ temp[0]=$2;temp[1]=NULL;$$ = ast_node_create(PTR, "PTR", temp); }
+	| '*' type_qualifier_list				{ temp[0]=$2;temp[1]=NULL;$$ = ast_node_create(PTR, "pointer", temp); }
 	| '*' pointer							{ temp[0]=NULL;add_children($2, ast_node_create(TYPE_QUAL_LIST, "type_qual_list", temp)); $$ = $2; }
-	| '*'									{ temp[0]=NULL;temp[1]=ast_node_create(TYPE_QUAL_LIST, "type_qual_list", temp);temp[2]=NULL;$$ = ast_node_create(PTR, "PTR", temp+1); }
+	| '*'									{ temp[0]=NULL;temp[1]=ast_node_create(TYPE_QUAL_LIST, "type_qual_list", temp);temp[2]=NULL;$$ = ast_node_create(PTR, "pointer", temp+1); }
 	;
 
 type_qualifier_list

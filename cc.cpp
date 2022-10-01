@@ -25,11 +25,15 @@ main(int argc, char **argv)
   int ret = yyparse();
   printf("retv = %d\n", ret);
   if (ret == 0) {
-    printf("-------- ABSTRACT SYNTAX TREE -------\n");
-    struct _ast_node *root_node = get_ast_root();
-    dump_ast(root_node);
-    ast_destroy(root_node);
+    printf("Do you want to see the AST representation (y/n)? ");
+    char c;
+    scanf("%c", &c);
+    if (c == 'y') {
+      printf("-------- ABSTRACT SYNTAX TREE -------\n");
+      struct _ast_node *root_node = get_ast_root();
+      dump_ast(root_node);
+      ast_destroy(root_node);   // free the memory
+    }
   }
-  
   exit(0);
 }
