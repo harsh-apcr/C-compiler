@@ -9,7 +9,7 @@ http://www.quut.com/c/ANSI-C-grammar-y-2011.html
 1. Open the terminal and cd into the source code directory
 2. type make to compile all the source code
 3. run the binary cc which takes a C file as an argument and (if parsing succeeds) it prints an AST on the console
-    * usage : ./cc <prog>.c
+    * usage : ./cc \<prog\>.c
 4. NOTE : this program doesn't exhaustively support all C constructs and only supports `function_definition`, `expressions` and related parts of the grammar
 5. Three sample programs are also provided (in examples directory) to test the AST implementation
 
