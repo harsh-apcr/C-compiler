@@ -1,6 +1,7 @@
-%{
+%code top {
 #include <cstdio>
 #include <iostream>
+#include <cstring>
 using namespace std;
 
 // stuff from flex that bison needs to know about:
@@ -9,7 +10,7 @@ int yyparse();
 extern "C" FILE *yyin;
 void yyerror(const char *s);
 
-%}
+}
 
 %code requires {
 #include "ast.h"
@@ -17,15 +18,16 @@ struct _ast_node* get_ast_root();
 extern struct _ast_node *root;
 }
 
-%{
+%code {
 #include "ast.h"
-struct _ast_node* temp[4];
+struct _ast_node* temp[5];
 struct _ast_node *root;
-%}
+}
 
 %union{
 	struct _ast_node *node;char *sval;
-}	
+}
+
 %token <sval> IDENTIFIER I_CONSTANT F_CONSTANT STRING_LITERAL FUNC_NAME SIZEOF
 %token <sval> PTR_OP INC_OP DEC_OP LEFT_OP RIGHT_OP LE_OP GE_OP EQ_OP NE_OP
 %token <sval> AND_OP OR_OP MUL_ASSIGN DIV_ASSIGN MOD_ASSIGN ADD_ASSIGN
@@ -49,7 +51,7 @@ struct _ast_node *root;
 %type <node> declarator direct_declarator pointer type_qualifier_list parameter_type_list parameter_list
 %type <node> parameter_declaration
 %type <node> statement labeled_statement compound_statement block_item_list block_item expression_statement
-%type <node> translation_unit external_declaration function_definition
+%type <node> translation_unit external_declaration function_definition selection_statement iteration_statement jump_statement
 
 %type <node> primary_expression argument_expression_list unary_expression cast_expression postfix_expression exclusive_or_expression 
 %type <node> multiplicative_expression additive_expression shift_expression relational_expression equality_expression and_expression
@@ -499,9 +501,9 @@ statement
 	: labeled_statement
 	| compound_statement
 	| expression_statement
-/*	| selection_statement
+	| selection_statement
 	| iteration_statement
-	| jump_statement	*/
+	| jump_statement	
 	;
 
 labeled_statement
@@ -529,30 +531,30 @@ expression_statement
 	: ';'											{ temp[0]=NULL;$$ = ast_node_create(EXPR_STMT, "expr_stmt", temp); }
 	| expression ';'								{ temp[0]=$1;temp[1]=NULL;$$ = ast_node_create(EXPR_STMT, "expr_stmt", temp); }
 	;
-/*
+
 selection_statement
-	: IF '(' expression ')' statement ELSE statement
-	| IF '(' expression ')' statement
-	| SWITCH '(' expression ')' statement
+	: IF '(' expression ')' statement ELSE statement		{ temp[0]=$3;temp[1]=$5;temp[2]=$7;temp[3]=NULL;$$=ast_node_create(IF_ELSE_STMT, "if-else", temp); }
+	| IF '(' expression ')' statement						{ temp[0]=$3;temp[1]=$5;temp[3]=NULL;$$=ast_node_create(IF_STMT, "if", temp); }
+	| SWITCH '(' expression ')' statement					{ temp[0]=$3;temp[1]=$5;temp[3]=NULL;$$=ast_node_create(SWITCH_STMT, "switch", temp); }
 	;
 
 iteration_statement
-	: WHILE '(' expression ')' statement
-	| DO statement WHILE '(' expression ')' ';'
-	| FOR '(' expression_statement expression_statement ')' statement
-	| FOR '(' expression_statement expression_statement expression ')' statement
-	| FOR '(' declaration expression_statement ')' statement
-	| FOR '(' declaration expression_statement expression ')' statement
+	: WHILE '(' expression ')' statement											{ temp[0]=$3;temp[1]=$5;temp[2]=NULL;$$=ast_node_create(WHILE_STMT, "while-loop", temp); }
+	| DO statement WHILE '(' expression ')' ';'										{ temp[0]=$2;temp[1]=$5;temp[2]=NULL;$$=ast_node_create(DO_WHILE_STMT, "do-while-loop", temp); }
+	| FOR '(' expression_statement expression_statement ')' statement				{ temp[0]=$3;temp[1]=$4;temp[2]=$6;temp[3]=NULL;$$ = ast_node_create(FOR_STMT1, "for-loop-1", temp); }
+	| FOR '(' expression_statement expression_statement expression ')' statement	{ temp[0]=$3;temp[1]=$4;temp[2]=$5;temp[3]=$7;temp[4]=NULL;$$ = ast_node_create(FOR_STMT2, "for-loop-2", temp); }
+	| FOR '(' declaration expression_statement ')' statement						{ temp[0]=$3;temp[1]=$4;temp[2]=$6;temp[3]=NULL;$$ = ast_node_create(FOR_STMT3, "for-loop-3", temp); }
+	| FOR '(' declaration expression_statement expression ')' statement				{ temp[0]=$3;temp[1]=$4;temp[2]=$5;temp[3]=$7;temp[4]=NULL;$$ = ast_node_create(FOR_STMT4, "for-loop-4", temp); }
 	;
 
 jump_statement
-	: GOTO IDENTIFIER ';'
-	| CONTINUE ';'
-	| BREAK ';'
-	| RETURN ';'
-	| RETURN expression ';'
+	: GOTO IDENTIFIER ';'							{ temp[0]=NULL;temp[1]=ast_node_create(ID, $2, temp);temp[2]=NULL;$$=ast_node_create(GOTO_STMT, "goto_stmt", temp+1); }
+	| CONTINUE ';'									{ temp[0]=NULL;$$=ast_node_create(CONTINUE_STMT, "continue_stmt", temp); }
+	| BREAK ';'										{ temp[0]=NULL;$$=ast_node_create(BREAK_STMT, "break_stmt", temp); }
+	| RETURN ';'									{ temp[0]=NULL;$$=ast_node_create(RETURN_STMT1, "return_stmt1", temp); }	
+	| RETURN expression ';'							{ temp[0]=$2;temp[1]=NULL;$$=ast_node_create(RETURN_STMT2, "return_stmt2", temp); }
 	;
-*/
+
 
 translation_unit
 	: external_declaration							{ temp[0]=$1;temp[1]=NULL;$$ = ast_node_create(TRANSLATION_UNIT, "translation_unit", temp);root=$$; }
