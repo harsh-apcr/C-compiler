@@ -13,13 +13,13 @@ void yyerror(const char *s);
 }
 
 %code requires {
-#include "ast.h"
+#include "ast.hpp"
 struct _ast_node* get_ast_root();
 extern struct _ast_node *root;
 }
 
 %code {
-#include "ast.h"
+#include "ast.hpp"
 struct _ast_node* temp[5];
 struct _ast_node *root;
 }
