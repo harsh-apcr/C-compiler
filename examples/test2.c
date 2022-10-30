@@ -1,15 +1,26 @@
-
-int foo() {
-    bar();
+int factorial(int n)
+{
+	if (n <= 0)
+		return 1;
+	else return n*factorial(n-1);
 }
 
-int bar() {
-    int x = foobar("hello world", (110 - 56) * 254 % 100 / 200 ^ 0xC0FFEE);
+int fibonacci(int a, int b, int n)
+{
+	if (n <= 0)
+		return a;
+
+	while (n > 0) {
+		int t;
+		t = b;
+		b = a+b;
+		a = t;
+		n = n-1;
+	}
+	return b;
 }
-int global;
-int foobar(const char *str, int x, ...) {
-    printf(str);
-    int y = (x & 0xB00B1E5) | 0x1239813;
-    int *arr;
-    int z = arr[y];
+
+int main()
+{
+  return fibonacci(factorial(1), factorial(2), factorial(5));
 }

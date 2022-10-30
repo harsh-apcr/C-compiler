@@ -111,7 +111,7 @@ void enter_scope(symbol_table& sym_table) {
     sym_table.push_back(new_scope);
 }
 
-/*llvm::Value**/ 
+/*llvm::Type**/ 
 bool find_symbol(const symbol_table& sym_table, const std::string& symbol) {
 
     if (sym_table.empty()) return false;
@@ -257,7 +257,6 @@ void scope_checker(symbol_table &sym_table,label_table &label_table, struct _ast
                     if (param_type_list != NULL)
                         scope_checker(sym_table, label_table, param_type_list, true);   // handel this case
                 }
-                // don't need to worry about parameter_type_list (they won't affect symbol table at all)
                 break;
             }
 

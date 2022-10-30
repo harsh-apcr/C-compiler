@@ -9,10 +9,10 @@ cc: cc.cpp c.tab.o c.lex.o ast.o
 	$(CC) $^ -g $(LDFLAGS) -o $@
 
 c.tab.o: c.tab.cpp c.tab.hpp
-	g++ -c $^
+	$(CC) -c $^
 
 c.lex.o: c.lex.cpp
-	g++ -c $<
+	$(CC) -c $<
 
 ast.o: ast.cpp ast.hpp
 	$(CC) -c $(CFLAGS) ast.cpp
