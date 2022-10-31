@@ -5,13 +5,19 @@ LDFLAGS = `llvm-config --cxxflags --ldflags --libs`
 
 all: cc
 # sudo apt-get install llvm-dev
-cc: cc.cpp c.tab.o c.lex.o ast.o
+cc: cc.cpp c.tab.o c.lex.o ast.o scope_check.o
 	$(CC) $^ -g $(LDFLAGS) -o $@
 
 c.tab.o: c.tab.cpp c.tab.hpp
 	$(CC) -c $^
 
 c.lex.o: c.lex.cpp
+	$(CC) -c $<
+
+codegen.o : codegen.cpp
+	$(CC) -c $<
+
+scope_check.o: scope_check.cpp
 	$(CC) -c $<
 
 ast.o: ast.cpp ast.hpp
