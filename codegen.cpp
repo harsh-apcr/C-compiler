@@ -39,38 +39,15 @@ llvm::Value *LogErrorV(const char *name) {
     fprintf(stderr, "log-error : unknown variable named `%s`", name);
     return nullptr;
 }
-// also look for llvm::StringLiteral
-llvm::Value *constant_codegen(struct _ast_node *root) {
-    assert(root->node_type == I_CONST 
-        || root->node_type == F_CONST);
-    
-    if (root->node_type == I_CONST) {
-        return llvm::ConstantInt::get(TheContext, llvm::APInt(sizeof(int), root->node_val, 10));
-    }
-    if (root->node_type == F_CONST) {
-        return llvm::ConstantFP::get(TheContext, llvm::APFloat(atof(root->node_val)));
-    }
-}
-
-// id is on stack
-llvm::Value *id_codegen(struct _ast_node *root) {
-    assert(root->node_type == ID);
-    llvm::Value *v = NamedValues[root->node_val];
-    if (!v) LogErrorV(root->node_val);
-    return Builder.CreateLoad(v, root->node_val);
-}
 
 llvm::Value *LogErrorB(const char *op, const char *ty1, const char *ty2) {
     fprintf(stderr, "log-error : invalid operands to binary %s (have `%s` and `%s`)", op, ty1, ty2);
     return nullptr;
 }
 
-// need to complete this properly
-std::string type_to_str(const llvm::Type *Ty);
-
-inline void convert_bool(llvm::Value *val) {
-    val = Builder.CreateICmpEQ(val, zero_val);
-    val = Builder.CreateZExtOrBitCast(val, llvm::IntegerType::get(TheContext, sizeof(int)));
+llvm::Value *LogErrorF(const char *name) {
+    fprintf(stderr, "log-error : unknown function named `%s`", name);
+    return nullptr;
 }
 
 // val1 and val2 are both integer types
@@ -93,6 +70,36 @@ void make_common_type(llvm::Value *val1, llvm::Value *val2) {
     val2 = Builder.CreateSExtOrTrunc(val2, common_type);
 }
 
+inline void convert_bool(llvm::Value *val) {
+    val = Builder.CreateICmpEQ(val, zero_val);
+    val = Builder.CreateZExtOrBitCast(val, llvm::IntegerType::get(TheContext, sizeof(int)));
+}
+
+
+// also look for llvm::StringLiteral
+llvm::Value *constant_codegen(struct _ast_node *root) {
+    assert(root->node_type == I_CONST 
+        || root->node_type == F_CONST);
+    
+    if (root->node_type == I_CONST) {
+        return llvm::ConstantInt::get(TheContext, llvm::APInt(sizeof(int), root->node_val, 10));
+    }
+    if (root->node_type == F_CONST) {
+        return llvm::ConstantFP::get(TheContext, llvm::APFloat(atof(root->node_val)));
+    }
+}
+
+// id is on stack
+llvm::Value *id_codegen(struct _ast_node *root) {
+    assert(root->node_type == ID);
+    llvm::Value *v = NamedValues[root->node_val];
+    if (!v) LogErrorV(root->node_val);
+    return Builder.CreateLoad(v, root->node_val);
+}
+
+// need to complete this properly
+std::string type_to_str(const llvm::Type *Ty);
+
 llvm::Value *binop_codegen(struct _ast_node *root) {
     assert(root->children[0]);assert(root->children[1]);assert(!root->children[2]);
     llvm::Value *lhs = codegen(root->children[0]);
@@ -101,6 +108,7 @@ llvm::Value *binop_codegen(struct _ast_node *root) {
     
     llvm::Value *cmp_ret;
     if (!lhs->getType()->isIntegerTy() || !rhs->getType()->isIntegerTy()) {
+        // lhs or rhs is a float type
         switch(root->node_type) {
             case MULT:
                 return Builder.CreateFMul(lhs, rhs, "multmp");
@@ -111,6 +119,7 @@ llvm::Value *binop_codegen(struct _ast_node *root) {
             case MINUS:
                 return Builder.CreateFSub(lhs, rhs, "subtmp");
             case LESS_THAN:
+                // O version of compare returns true only if both lhs and rhs are not NaN and comp holds
                 cmp_ret = Builder.CreateFCmpOLT(lhs, rhs, "lttemp");
                 break;
             case GREATER_THAN:
@@ -138,10 +147,10 @@ llvm::Value *binop_codegen(struct _ast_node *root) {
         return Builder.CreateZExtOrBitCast(cmp_ret, Builder.getInt32Ty());
     } else {
         // both lhs and rhs are int type
-        // before doing any operation on them, need to convert them into same type for this opcode
+        // before doing any operation on them, need to convert them into same type for any llvm-opcode
         make_common_type(lhs, rhs);
         // currently all operations are `signed int` operations
-        // if you want to make it unsigned then you'd need to pass the symbol table
+        // if you want to make it unsigned then you'd need to pass a symbol table for types
         switch(root->node_type) {
             case MULT:
                 return Builder.CreateMul(lhs, rhs, "multmp");
@@ -191,6 +200,65 @@ llvm::Value *binop_codegen(struct _ast_node *root) {
         }
     }
 }
+
+llvm::Value *function_call_codegen(struct _ast_node *root) {
+    assert(root->node_type == FUNCTION_CALL);
+    llvm::Function *CalleeF = TheModule->getFunction(root->node_val);
+    if (!CalleeF) return LogErrorV(root->node_val);
+
+    // check for argument mismatch
+    struct _ast_node *arg_list = root->children[1];   // node->type = ARG_EXP_LIST
+    int num_args = 0;
+    if (arg_list) 
+        for(num_args = 0;arg_list->children[num_args] != NULL;num_args++);
+
+    if (num_args != CalleeF->arg_size()) {
+        fprintf(stderr, "log-error : invalid number arguments passed");
+        return nullptr;
+    }
+    
+    std::vector<llvm::Value *> ArgsV(num_args, nullptr);
+    for (unsigned int i = 0; i != num_args; ++i) {
+        ArgsV[i] = codegen(arg_list->children[i]);
+        if (!ArgsV[i])
+            return nullptr;
+    }
+
+    return Builder.CreateCall(CalleeF, ArgsV, "calltmp");
+} 
+
+llvm::Function *function_decl_codegen(struct _ast_node *root) {
+    assert(root->node_type == FUNCTION_DECL);
+    
+}
+
+/*
+Value *CallExprAST::codegen() {
+  // Look up the name in the global module table.
+  Function *CalleeF = TheModule->getFunction(Callee);
+  if (!CalleeF)
+    return LogErrorV("Unknown function referenced");
+
+  // If argument mismatch error.
+  if (CalleeF->arg_size() != Args.size())
+    return LogErrorV("Incorrect # arguments passed");
+
+  std::vector<Value *> ArgsV;
+  for (unsigned i = 0, e = Args.size(); i != e; ++i) {
+    ArgsV.push_back(Args[i]->codegen());
+    if (!ArgsV.back())
+      return nullptr;
+  }
+
+  return Builder.CreateCall(CalleeF, ArgsV, "calltmp");
+}
+*/
+
+
+
+
+
+
 
 
 llvm::Value *id_decl_codegen(struct _ast_node *root);
