@@ -392,8 +392,8 @@ direct_declarator
 	| direct_declarator '[' type_qualifier_list assignment_expression ']'
 	| direct_declarator '[' type_qualifier_list ']'
 	| direct_declarator '[' assignment_expression ']' */
-	| direct_declarator '(' parameter_type_list ')'		{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(FUNCTION_DECL, "function_decl", temp);}
-	| direct_declarator '(' ')'							{ temp[0]=$1;temp[1]=NULL;$$ = ast_node_create(FUNCTION_DECL, "function_decl", temp);}
+	| IDENTIFIER '(' parameter_type_list ')'		{ temp[0]=NULL;temp[1]=ast_node_create(ID, $1, temp);temp[2]=$3;temp[3]=NULL;$$ = ast_node_create(FUNCTION_DECL, "function_decl", temp+1);}
+	| IDENTIFIER '(' ')'							{ temp[0]=NULL;temp[1]=ast_node_create(ID, $1, temp);temp[2]=NULL;$$ = ast_node_create(FUNCTION_DECL, "function_decl", temp+1);}
 //	| direct_declarator '(' identifier_list ')'
 	;
 

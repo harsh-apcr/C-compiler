@@ -259,9 +259,18 @@ llvm::Function *function_decl_codegen(struct _ast_node *root, llvm::Type *retty)
     return F;
 }
 
-llvm::Function *function_def_codegen(struct _ast_node *root, llvm::Type *retty) {
+llvm::Function *function_def_codegen(struct _ast_node *root) {
     assert(root->node_type == FUNCTION_DEF);
-    // TODO : add remaining logic
+    // first check for existing decl of function
+    struct _ast_node *prototype = root->children[1];    // node->type == DECLARATOR
+    // if (prototype->children[0]->node_type != IDENTIFIER_DECL) {
+    //     fprintf(stderr, "log-error: invalid function prototype\n");
+    //     return nullptr;
+    // }  // this check has already been made during scope check time
+    assert(prototype->children[0]->node_type == IDENTIFIER_DECL);
+    const char *fun_name;
+    llvm::Function *TheFunction = TheModule->getFunction(fun_name);
+
 }
 
 /*

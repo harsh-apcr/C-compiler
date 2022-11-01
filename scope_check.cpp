@@ -13,6 +13,11 @@ typedef std::vector<std::unordered_map<std::string, llvm::Type*>> symbol_table; 
 
 typedef std::unordered_map<std::string, llvm::Value*> label_table;
 
+#define ADD_IDNODE(root, sym_table) {assert(root->children[0]->node_type == ID);struct _ast_node *id_node = root->children[0]; \
+                                    if (check_scope(sym_table, id_node->node_val)) { \
+                                        fprintf(stderr, "error: double declaration of variable/function `%s`\n", id_node->node_val);exit(1); \
+                                    } else add_symbol(sym_table, id_node->node_val, nullptr);}
+
 void enter_scope(symbol_table& sym_table) {
     std::unordered_map<std::string, llvm::Type*> new_scope; 
     sym_table.push_back(new_scope);
@@ -142,25 +147,20 @@ void scope_checker(symbol_table &sym_table,label_table &label_table, struct _ast
             }
             
             case IDENTIFIER_DECL: {
-                struct _ast_node *id_node = root->children[0];
-                if (check_scope(sym_table, id_node->node_val)) {
-                    fprintf(stderr, "error: double declaration of variable/function `%s`\n", id_node->node_val);
-                    exit(1);
-                } else {
-                    // no prev declaration of symbol in current scope
-                    add_symbol(sym_table, id_node->node_val, nullptr);
-                }
+                // root->children[0]->type == ID
+                ADD_IDNODE(root, sym_table)
                 break;
             }
             case FUNCTION_DECL: {
-                struct _ast_node* direct_declarator_node = root->children[0];   // node->type == IDENTIFIER_DECL
-                if (!is_fun_def)    // not a function definition (just a declaration)
-                    scope_checker(sym_table, label_table, direct_declarator_node, false);
-                else  { // it is a function definition
-                    // check if it has already been declared or not
-                    const char *fun_name = direct_declarator_node->children[0]->node_val;   // get function name
+                const char *fun_name = root->children[0]->node_val;  // root->children[0]->type == ID
+                if (!is_fun_def)  {  // not a function definition (just a declaration)
+                    ADD_IDNODE(root, sym_table)
+                }
+                else  { 
+                    // it is a function definition
+                    // check if it has already been declared or not                    
                     if (!check_scope(sym_table, fun_name)) 
-                        scope_checker(sym_table, label_table, direct_declarator_node, true);
+                        ADD_IDNODE(root, sym_table)
                     // otherwise it is already present in the symbol table
                     struct _ast_node* param_type_list = root->children[1];
                     printf("entered scope -function_decl\n");
