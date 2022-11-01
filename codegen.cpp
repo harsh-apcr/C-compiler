@@ -6,6 +6,7 @@
 #include <string>
 #include <cassert>
 #include "ast.hpp"
+#include "scope_check.hpp"
 
 #include "llvm/IR/Value.h"
 #include "llvm/ADT/APFloat.h"
@@ -18,6 +19,8 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
+#include "llvm/IR/Verifier.h"
+
 
 #define zero_val llvm::ConstantInt::get(TheContext, llvm::APInt(sizeof(int), "0", 10))
 // zero_val is llvm::Value*
@@ -25,15 +28,31 @@
 static llvm::LLVMContext TheContext;
 static llvm::IRBuilder<> Builder(TheContext);
 static std::unique_ptr<llvm::Module> TheModule;
-static std::unordered_map<std::string, llvm::AllocaInst*> NamedValues;
+static symbol_table NamedValues;
 
-// static llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
-//                                                 const llvm::Twine &VarName,
-//                                                 const llvm::Type *Ty) {
-//   llvm::IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
-//                  TheFunction->getEntryBlock().begin());
-//   return TmpB.CreateAlloca(Ty, nullptr, VarName);
-// }
+// Create and Alloca instruction in the entry block of the function. This is used for mutable variables etc.
+static llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
+                                          llvm::Type *Ty,
+                                          const std::string &VarName) {
+  llvm::IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                 TheFunction->getEntryBlock().begin());
+  return TmpB.CreateAlloca(Ty, 0,
+                           VarName.c_str());    // array size = 0(no array support right now)
+}
+
+
+llvm::Type *get_type(struct _ast_node *decl_spec, struct _ast_node *ptr) {
+    assert(decl_spec->node_type == DECLSPEC);
+    assert(ptr->node_type == PTR);
+}
+
+// need to complete this properly
+std::string type_to_str(const llvm::Type *Ty);
+
+llvm::Type *get_type_decl_spec(struct _ast_node *node) {
+    assert(node->node_type == DECLSPEC);
+    // get type from decl spec node
+}
 
 llvm::Value *LogErrorV(const char *name) {
     fprintf(stderr, "log-error : unknown variable named `%s`", name);
@@ -75,7 +94,6 @@ inline void convert_bool(llvm::Value *val) {
     val = Builder.CreateZExtOrBitCast(val, llvm::IntegerType::get(TheContext, sizeof(int)));
 }
 
-
 // also look for llvm::StringLiteral
 llvm::Value *constant_codegen(struct _ast_node *root) {
     assert(root->node_type == I_CONST 
@@ -92,13 +110,10 @@ llvm::Value *constant_codegen(struct _ast_node *root) {
 // id is on stack
 llvm::Value *id_codegen(struct _ast_node *root) {
     assert(root->node_type == ID);
-    llvm::Value *v = NamedValues[root->node_val];
+    llvm::Value *v = find_symbol(NamedValues, root->node_val);
     if (!v) LogErrorV(root->node_val);
     return Builder.CreateLoad(v, root->node_val);
 }
-
-// need to complete this properly
-std::string type_to_str(const llvm::Type *Ty);
 
 llvm::Value *binop_codegen(struct _ast_node *root) {
     assert(root->children[0]);assert(root->children[1]);assert(!root->children[2]);
@@ -201,6 +216,10 @@ llvm::Value *binop_codegen(struct _ast_node *root) {
     }
 }
 
+llvm::Value *cmpd_stmt_codegen(struct _ast_node *root) {
+    assert(root->node_type == CMPND_STMT);
+}
+
 llvm::Value *function_call_codegen(struct _ast_node *root) {
     assert(root->node_type == FUNCTION_CALL);
     llvm::Function *CalleeF = TheModule->getFunction(root->node_val);
@@ -213,7 +232,7 @@ llvm::Value *function_call_codegen(struct _ast_node *root) {
         for(num_args = 0;arg_list->children[num_args] != NULL;num_args++);
 
     if (num_args != CalleeF->arg_size()) {
-        fprintf(stderr, "log-error : invalid number arguments passed");
+        fprintf(stderr, "log-error: invalid number arguments passed");
         return nullptr;
     }
     
@@ -227,13 +246,8 @@ llvm::Value *function_call_codegen(struct _ast_node *root) {
     return Builder.CreateCall(CalleeF, ArgsV, "calltmp");
 } 
 
-llvm::Type *get_type_decl_spec(struct _ast_node *node) {
-    assert(node->node_type == DECLSPEC);
-    // get type from decl spec node
-}
-
 // get return type of function_decl from DECL node (you cannot get it from function_decl)
-llvm::Function *function_decl_codegen(struct _ast_node *root, llvm::Type *retty) {
+llvm::Function *function_decl_codegen(struct _ast_node *root, llvm::Type *retty, std::vector<std::string> &argv) {
     assert(root->node_type == FUNCTION_DECL);
     struct _ast_node *param_list = root->children[1];   // node->type == PARAM_LIST
     std::vector<llvm::Type *> argtypes;
@@ -252,48 +266,85 @@ llvm::Function *function_decl_codegen(struct _ast_node *root, llvm::Type *retty)
 
     llvm::Function* F = llvm::Function::Create(FT,
                                          llvm::Function::ExternalLinkage,
-                                          root->children[0]->children[0]->node_val, // function name
+                                          root->children[0]->node_val, // root->children[0]->node_type == ID
                                           TheModule.get());
     // to continue:
-    // set names for all the arguments (not neccessary will have to change codegen fun interface yet again)
+    // set names for all the arguments from the argument vector (argv)
+    unsigned idx = 0;
+    for(auto &Arg : F->args()) {
+        // assert(argv[idx]);
+        Arg.setName(argv[idx++]);
+    }
+
     return F;
 }
 
+// see the RetValue if statement again after generating code for cmpd_statement
 llvm::Function *function_def_codegen(struct _ast_node *root) {
     assert(root->node_type == FUNCTION_DEF);
     // first check for existing decl of function
-    struct _ast_node *prototype = root->children[1];    // node->type == DECLARATOR
-    // if (prototype->children[0]->node_type != IDENTIFIER_DECL) {
-    //     fprintf(stderr, "log-error: invalid function prototype\n");
-    //     return nullptr;
-    // }  // this check has already been made during scope check time
-    assert(prototype->children[0]->node_type == IDENTIFIER_DECL);
-    const char *fun_name;
+    struct _ast_node *decl_spec = root->children[0];        // decl_spec->node_type == DECL_SPEC
+    struct _ast_node *prototype = root->children[1];        // prototype->node_type == DECLARATOR
+    struct _ast_node *retptr = prototype->children[1];      // retptr->node_type == PTR
+    struct _ast_node *fun_decl = prototype->children[0];    // fun_decl->node_type == FUNCTION_DECL
+    struct _ast_node *param_list = fun_decl->children[1];   // param_list->node_type == PARAM_LIST
+    // all the child nodes of param_list are PARAM_DECL
+    std::vector<std::string> argv;
+    struct _ast_node **param_decl;
+    struct _ast_node *declarator;
+    struct _ast_node *id_decl;
+    for(param_decl = param_list->children;*param_decl != NULL;++param_decl) {
+        declarator = (*param_decl)->children[1];
+        assert(declarator);
+        // assuming that we have no function pointer being passed in our language for now we may try to extend this later
+        id_decl = declarator->children[0];
+        assert(id_decl->node_type == IDENTIFIER_DECL);
+        argv.push_back(id_decl->children[0]->node_val);
+    }
+    const char *fun_name = fun_decl->children[0]->node_val;
     llvm::Function *TheFunction = TheModule->getFunction(fun_name);
+    llvm::Type *rettype = get_type(decl_spec, retptr);
+    if (!TheFunction)
+        TheFunction = function_decl_codegen(fun_decl, rettype, argv); // prototype needs to be generated with named arguments
+    if (!TheFunction) 
+        return nullptr;
+    if (!TheFunction->empty()) {
+        fprintf(stderr, "log-error: function `%s` is defined more than once", fun_name);
+    }
 
+    // Create a new basic block to start insertion into
+    llvm::BasicBlock *BB = llvm::BasicBlock::Create(TheContext, "entry", TheFunction);
+    Builder.SetInsertPoint(BB);
+
+    // Record the function arguments in the named-values map (push a new scope)
+    enter_scope(NamedValues);
+    for(auto &Arg : TheFunction->args()) {
+        // create an alloca instr for this variable
+        llvm::AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Arg.getType(), Arg.getName());
+
+        // store the initial value into the alloca
+        Builder.CreateStore(&Arg, Alloca);
+
+        // add argument to the symbol table
+        add_symbol(NamedValues, Arg.getName(), Alloca);
+    }
+
+    struct _ast_node *cmpd_stmt = root->children[2]; // cmp_stmt->node_type == CMPND_STMT
+    
+    if (llvm::Value *RetVal = cmpd_stmt_codegen(cmpd_stmt)/*codegen the body*/) {
+        if (!get_type(decl_spec, retptr)->isVoidTy())
+            Builder.CreateRet(RetVal);  // for a return statement just return its body as a value
+        else Builder.CreateRetVoid();   // for an empty return ? FIXME!! come back here after see'ing empty return
+
+        exit_scope(NamedValues);
+        llvm::verifyFunction(*TheFunction);
+        return TheFunction;
+    }
+    // Error reading the body, remove function
+    TheFunction->eraseFromParent();
+    exit_scope(NamedValues);
+    return nullptr;
 }
-
-/*
-Value *CallExprAST::codegen() {
-  // Look up the name in the global module table.
-  Function *CalleeF = TheModule->getFunction(Callee);
-  if (!CalleeF)
-    return LogErrorV("Unknown function referenced");
-
-  // If argument mismatch error.
-  if (CalleeF->arg_size() != Args.size())
-    return LogErrorV("Incorrect # arguments passed");
-
-  std::vector<Value *> ArgsV;
-  for (unsigned i = 0, e = Args.size(); i != e; ++i) {
-    ArgsV.push_back(Args[i]->codegen());
-    if (!ArgsV.back())
-      return nullptr;
-  }
-
-  return Builder.CreateCall(CalleeF, ArgsV, "calltmp");
-}
-*/
 
 
 
