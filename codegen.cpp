@@ -227,9 +227,41 @@ llvm::Value *function_call_codegen(struct _ast_node *root) {
     return Builder.CreateCall(CalleeF, ArgsV, "calltmp");
 } 
 
-llvm::Function *function_decl_codegen(struct _ast_node *root) {
+llvm::Type *get_type_decl_spec(struct _ast_node *node) {
+    assert(node->node_type == DECLSPEC);
+    // get type from decl spec node
+}
+
+// get return type of function_decl from DECL node (you cannot get it from function_decl)
+llvm::Function *function_decl_codegen(struct _ast_node *root, llvm::Type *retty) {
     assert(root->node_type == FUNCTION_DECL);
-    
+    struct _ast_node *param_list = root->children[1];   // node->type == PARAM_LIST
+    std::vector<llvm::Type *> argtypes;
+    if (param_list) {
+        // iterate over children of param_list (param_decl nodes), 
+        //get their types from declaration specifiers, (first child of param_Decl node)
+        struct _ast_node **param_decl;
+        struct _ast_node *decl_spec;
+        for(param_decl = param_list->children;*param_decl != NULL;param_decl++) {
+            decl_spec = (*param_decl)->children[0]; // (*param_decl)->children[0] is DECL_SPEC node
+            argtypes.push_back(get_type_decl_spec(decl_spec)); 
+        }
+    }
+    llvm::FunctionType *FT = llvm::FunctionType::get(retty, argtypes, false); 
+    // false parameter indicates that it is not a vararg
+
+    llvm::Function* F = llvm::Function::Create(FT,
+                                         llvm::Function::ExternalLinkage,
+                                          root->children[0]->children[0]->node_val, // function name
+                                          TheModule.get());
+    // to continue:
+    // set names for all the arguments (not neccessary will have to change codegen fun interface yet again)
+    return F;
+}
+
+llvm::Function *function_def_codegen(struct _ast_node *root, llvm::Type *retty) {
+    assert(root->node_type == FUNCTION_DEF);
+    // TODO : add remaining logic
 }
 
 /*

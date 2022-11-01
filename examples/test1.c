@@ -1,6 +1,8 @@
 
 int printf(const char *filename, ...);
-int o;
+int o = 0;
+
+void simple_arith(int);
 
 void simple_arith(int o) {
     int x, *z, w = 10;
