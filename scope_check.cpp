@@ -1,31 +1,25 @@
-#include <cstdlib>
-#include <cstdio>
-#include <cstring>
-#include <vector>
-#include <unordered_map>
-#include <string>
-#include "ast.hpp"
-#include <cassert>
-#include "llvm/IR/Type.h"
-#include "llvm/IR/Value.h"
-
-typedef std::vector<std::unordered_map<std::string, llvm::Type*>> symbol_table;    // stack of scopes
-
-typedef std::unordered_map<std::string, llvm::Value*> label_table;
-
-#define ADD_IDNODE(root, sym_table) {assert(root->children[0]->node_type == ID);struct _ast_node *id_node = root->children[0]; \
-                                    if (check_scope(sym_table, id_node->node_val)) { \
-                                        fprintf(stderr, "error: double declaration of variable/function `%s`\n", id_node->node_val);exit(1); \
-                                    } else add_symbol(sym_table, id_node->node_val, nullptr);}
+#include "scope_check.hpp"
 
 void enter_scope(symbol_table& sym_table) {
-    std::unordered_map<std::string, llvm::Type*> new_scope; 
+    std::unordered_map<std::string, llvm::AllocaInst*> new_scope; 
     sym_table.push_back(new_scope);
 }
 
-/*llvm::Type**/ 
-bool find_symbol(const symbol_table& sym_table, const std::string& symbol) {
+llvm::AllocaInst* find_symbol(const symbol_table& sym_table, const std::string& symbol) {
+    if (sym_table.empty()) return nullptr;
+    auto rend = sym_table.rend();
+    auto rbegin = sym_table.rbegin(); // initial top level symbol table
+    for(auto scope_itr = rbegin;scope_itr != rend;scope_itr++) {
+        if (scope_itr->find(symbol) != scope_itr->end()) {
+            // found symbol, return its value
+            return scope_itr->at(symbol);
+        }
+    }
+    // scope_itr == rend (one element past top level scope) => symbol doesn't exist in sym_table
+    return nullptr;
+}
 
+bool find_symbol_bool(const symbol_table& sym_table, const std::string& symbol) {
     if (sym_table.empty()) return false;
     auto rend = sym_table.rend();
     auto rbegin = sym_table.rbegin(); // initial top level symbol table
@@ -41,8 +35,8 @@ bool find_symbol(const symbol_table& sym_table, const std::string& symbol) {
 }
 
 // push symbol to the top scope
-void add_symbol(symbol_table& sym_table, const std::string& symbol, llvm::Type* ty) {
-    sym_table.back().insert({symbol, ty});
+void add_symbol(symbol_table& sym_table, const std::string& symbol, llvm::AllocaInst* alloca) {
+    sym_table.back().insert({symbol, alloca});
 }
 
 // add a label to your label_table
@@ -86,7 +80,7 @@ void scope_checker(symbol_table &sym_table,label_table &label_table, struct _ast
     else {
         switch(root->node_type) {
             case ID:    // not in a declaration context
-                if (!find_symbol(sym_table, root->node_val)) {
+                if (!find_symbol_bool(sym_table, root->node_val)) {
                     fprintf(stderr, "error: undeclared variable `%s`\n", root->node_val);
                     exit(1);
                 }
