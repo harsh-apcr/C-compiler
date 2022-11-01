@@ -41,6 +41,10 @@ static llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
 }
 
 
+static llvm::AllocaInst *CreateVariableAlloca(llvm::Type *Ty, const std::string &VarName) {
+    return Builder.CreateAlloca(Ty, 0, VarName);
+}
+
 llvm::Type *get_type(struct _ast_node *decl_spec, struct _ast_node *ptr) {
     assert(decl_spec->node_type == DECLSPEC);
     assert(ptr->node_type == PTR);
@@ -216,10 +220,92 @@ llvm::Value *binop_codegen(struct _ast_node *root) {
     }
 }
 
-llvm::Value *cmpd_stmt_codegen(struct _ast_node *root) {
-    assert(root->node_type == CMPND_STMT);
+llvm::Value *blkitem_codegen(struct _ast_node *root) {
+    // root is child node if blkitem_list
+    switch(root->node_type) {
+        // declaration
+        case DECL: {
+            struct _ast_node *decl_spec = root->children[0];
+            struct _ast_node *init_decl_list = root->children[1];
+            if (!init_decl_list) {
+                fprintf(stderr, "warning: useless type name in empty declaration");
+            } else {
+                struct _ast_node **init_decl;
+                struct _ast_node *declarator;
+                struct _ast_node *initializer;
+                struct _ast_node *direct_declarator;
+                struct _ast_node *ptr;
+                for(init_decl = init_decl_list->children;*init_decl!=NULL;init_decl++) {
+                    // each child of *init_decl is either declarator or initializer
+                    declarator = (*init_decl)->children[0];
+                    initializer = (*init_decl)->children[1];
+
+                    direct_declarator = declarator->children[0];    // identifier_decl or function_decl
+                    // cannot be a function declarator inside a function itself
+                    if (direct_declarator->node_type == FUNCTION_DECL) {
+                        fprintf(stderr, "error: function cannot be declared inside any '{' '}'");
+                        return nullptr;
+                    }
+                    // direct_declarator->node_type == IDENTIFIER_DECL
+
+                    ptr = declarator->children[1];  // could be null
+                    
+                    if (!initializer) {
+                        // initializer is null
+                    } else {
+                        // initializer in not null
+                    }
+                }
+            }
+            break;
+        }
+        // statement
+        case LABELED_STMT:
+        case CMPND_STMT:
+        case EXPR_STMT:
+        case IF_ELSE_STMT:
+        case IF_STMT:
+        case SWITCH_STMT:
+        case WHILE_STMT:
+        case DO_WHILE_STMT:
+        case FOR_STMT1:
+        case FOR_STMT2:
+        case FOR_STMT3:
+        case FOR_STMT4:
+        case GOTO_STMT:
+        case CONTINUE_STMT:
+        case BREAK_STMT:
+        case RETURN_STMT1:
+        case RETURN_STMT2:
+        default:
+            break;
+    }
 }
 
+llvm::Value *cmpd_stmt_codegen(struct _ast_node *root) {
+    assert(root->node_type == CMPND_STMT);
+    struct _ast_node *blk_item_list = root->children[0];
+    enter_scope(NamedValues);   // problem with enter_scope inside function_def_codegen
+    if (blk_item_list) {
+        struct _ast_node **blkitem;    // (*blk_item)->node_type == DECL or statement(lots of them)
+        for(blkitem = blk_item_list->children;*blkitem!=NULL;blkitem++) {
+            blkitem_codegen(*blkitem);
+        }
+    }
+    exit_scope(NamedValues);
+    return nullptr; // doesn't really have a significance
+}
+
+
+// identifier declaration node along with its type
+llvm::Value *id_decl_codegen(struct _ast_node *root, llvm::Type *Ty) {
+    assert(root->node_type == IDENTIFIER_DECL);
+    ADD_IDNODE(root, NamedValues);
+    llvm::AllocaInst *Alloca = CreateVariableAlloca(Ty, root->children[0]->node_val);
+    return Alloca;
+}
+
+// callee side code
 llvm::Value *function_call_codegen(struct _ast_node *root) {
     assert(root->node_type == FUNCTION_CALL);
     llvm::Function *CalleeF = TheModule->getFunction(root->node_val);
@@ -279,7 +365,7 @@ llvm::Function *function_decl_codegen(struct _ast_node *root, llvm::Type *retty,
     return F;
 }
 
-// see the RetValue if statement again after generating code for cmpd_statement
+// caller side code
 llvm::Function *function_def_codegen(struct _ast_node *root) {
     assert(root->node_type == FUNCTION_DEF);
     // first check for existing decl of function
@@ -330,30 +416,26 @@ llvm::Function *function_def_codegen(struct _ast_node *root) {
     }
 
     struct _ast_node *cmpd_stmt = root->children[2]; // cmp_stmt->node_type == CMPND_STMT
-    
-    if (llvm::Value *RetVal = cmpd_stmt_codegen(cmpd_stmt)/*codegen the body*/) {
-        if (!get_type(decl_spec, retptr)->isVoidTy())
-            Builder.CreateRet(RetVal);  // for a return statement just return its body as a value
-        else Builder.CreateRetVoid();   // for an empty return ? FIXME!! come back here after see'ing empty return
+    cmpd_stmt_codegen(cmpd_stmt);
+    llvm::BasicBlock *insert_blk = Builder.GetInsertBlock();
 
-        exit_scope(NamedValues);
-        llvm::verifyFunction(*TheFunction);
-        return TheFunction;
+    // insert block should not be terminated
+    assert(!insert_blk->getTerminator());
+
+    if (insert_blk->empty() && insert_blk->use_empty()) {
+        // empty basic block with no use
+        TheFunction->eraseFromParent();
+    } else if (!get_type_decl_spec(decl_spec)->isVoidTy()) {
+        fprintf(stderr, "warning : No return statement in a non-void function\n");
+        Builder.CreateRet(llvm::UndefValue::get(TheFunction->getReturnType())); // returns unspecified bit pattern
+    } else {
+        Builder.CreateRetVoid();
     }
-    // Error reading the body, remove function
-    TheFunction->eraseFromParent();
+
     exit_scope(NamedValues);
-    return nullptr;
+    llvm::verifyFunction(*TheFunction);
+
+    return TheFunction;
 }
-
-
-
-
-
-
-
-
-llvm::Value *id_decl_codegen(struct _ast_node *root);
-
 
 
