@@ -232,8 +232,8 @@ constant_expression
 	;
 
 declaration
-	: declaration_specifiers ';'								{ temp[0]=$1;temp[1]=NULL;$$ = ast_node_create(DECL, "declaration", temp);}
-	| declaration_specifiers init_declarator_list ';'			{ temp[0]=$1;temp[1]=$2;temp[2]=NULL;$$ = ast_node_create(DECL, "declaration", temp); }
+	: declaration_specifiers ';'								{ temp[0]=$1;temp[1]=NULL;$$ = ast_node_create(DECLARATION, "declaration", temp);}
+	| declaration_specifiers init_declarator_list ';'			{ temp[0]=$1;temp[1]=$2;temp[2]=NULL;$$ = ast_node_create(DECLARATION, "declaration", temp); }
 //	| static_assert_declaration
 	;
 
@@ -247,9 +247,9 @@ declaration_specifiers
 	| storage_class_specifier
 	*/
 	: type_specifier declaration_specifiers		{ add_children($2, $1); $$ = $2;}
-	| type_specifier							{ temp[0]=$1;temp[1]=NULL;ast_node_create(DECLSPEC, "declaration_spec", temp);}
+	| type_specifier							{ temp[0]=$1;temp[1]=NULL;ast_node_create(DECLARATION_SPEC, "declaration_spec", temp);}
 	| type_qualifier declaration_specifiers		{ add_children($2, $1); $$ = $2;}
-	| type_qualifier							{ temp[0]=$1;temp[1]=NULL;ast_node_create(DECLSPEC, "declaration_spec", temp);}
+	| type_qualifier							{ temp[0]=$1;temp[1]=NULL;ast_node_create(DECLARATION_SPEC, "declaration_spec", temp);}
 	/*| function_specifier declaration_specifiers
 	| function_specifier
 	| alignment_specifier declaration_specifiers
