@@ -112,8 +112,8 @@ void scope_checker(symbol_table &sym_table,label_table &label_table, struct _ast
             case LAND:
             case LOR:
             case TERNOP:
-            case ASSIGN_COMMA:                      // handel assignment_expression carefully!
-            case DECLARATION:                              // handel init_declarator_list carefully!
+            case EXPRESSION:                        // handel assignment_expression carefully!
+            case DECLARATION:                       // handel init_declarator_list carefully!
             case INIT_DECL_LIST:                    // handel init_declatator carefully!
             case INIT_DECL:                         // handel declarator carefully!
             case DECLARATOR:                        // pointer needs to be matched at default, check direct_declarator carefully!

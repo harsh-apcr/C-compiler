@@ -222,8 +222,8 @@ assignment_operator
 	;
 
 expression
-	: assignment_expression
-	| expression ',' assignment_expression						{ temp[0]=$1;temp[1]=$3;temp[2]=NULL;$$ = ast_node_create(ASSIGN_COMMA, "assign_comma", temp);}
+	: assignment_expression										{ temp[0]=$1;temp[1]=NULL;$$ = ast_node_create(EXPRESSION, "expression", temp);}
+	| expression ',' assignment_expression  					{ add_children($1, $3);$$ = $1;}
 	;
 
 
