@@ -101,12 +101,12 @@ generic_association
 postfix_expression
 	: primary_expression
 	| postfix_expression '[' expression ']'					{ temp[0] = $1;temp[1] = $3;temp[2] = NULL; $$ = ast_node_create(ARRAY_ACCESS, "[]", temp); }
-	| postfix_expression '(' ')'							{ temp[0] = $1;temp[1] = NULL; $$ = ast_node_create(FUNCTION_CALL, "()", temp);}
-	| postfix_expression '(' argument_expression_list ')'	{ temp[0] = $1;temp[1] = $3;temp[2] = NULL;$$ = ast_node_create(FUNCTION_CALL, "()", temp);}
+	| IDENTIFIER '(' ')'									{ temp[0] = NULL;temp[1] = ast_node_create(ID, $1, temp);temp[2]=NULL;$$ = ast_node_create(FUNCTION_CALL, "()", temp+1);}
+	| IDENTIFIER '(' argument_expression_list ')'			{ temp[0] = NULL;temp[1] = ast_node_create(ID, $1, temp);temp[2]=$3;temp[3]=NULL;$$ = ast_node_create(FUNCTION_CALL, "()", temp+1);}
 /*	| postfix_expression '.' IDENTIFIER
 	| postfix_expression PTR_OP IDENTIFIER	*/
 	| postfix_expression INC_OP								{ temp[0] = $1;temp[1] = NULL;$$ = ast_node_create(POSTINC_OP, "++(post)", temp);}
-	| postfix_expression DEC_OP								{ temp[0] = $1;temp[1] = NULL;$$ = ast_node_create(POSTDEC_OP, "-- (post)", temp);}
+	| postfix_expression DEC_OP								{ temp[0] = $1;temp[1] = NULL;$$ = ast_node_create(POSTDEC_OP, "--(post)", temp);}
 /*	| '(' type_name ')' '{' initializer_list '}'
 	| '(' type_name ')' '{' initializer_list ',' '}' */
 	;
