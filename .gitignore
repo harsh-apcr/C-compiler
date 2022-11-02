@@ -1,4 +1,7 @@
 .vscode
+examples/*
+.vscode
+*.gch
 *.out
 *.o
 cc

@@ -30,6 +30,8 @@ static llvm::IRBuilder<> Builder(TheContext);
 static std::unique_ptr<llvm::Module> TheModule;
 static symbol_table NamedValues;
 
+// ======== HELPER FUNCTIONS ========
+
 // Create and Alloca instruction in the entry block of the function. This is used for mutable variables etc.
 static llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
                                           llvm::Type *Ty,
@@ -46,15 +48,14 @@ static llvm::AllocaInst *CreateVariableAlloca(llvm::Type *Ty, const std::string 
 }
 
 llvm::Type *get_type(struct _ast_node *decl_spec, struct _ast_node *ptr) {
-    assert(decl_spec->node_type == DECLSPEC);
+    assert(decl_spec->node_type == DECLARATION_SPEC);
     assert(ptr->node_type == PTR);
 }
 
-// need to complete this properly
-std::string type_to_str(const llvm::Type *Ty);
+std::string type_to_str(const llvm::Type *Ty); // need to complete this properly
 
 llvm::Type *get_type_decl_spec(struct _ast_node *node) {
-    assert(node->node_type == DECLSPEC);
+    assert(node->node_type == DECLARATION_SPEC);
     // get type from decl spec node
 }
 
@@ -63,14 +64,33 @@ llvm::Value *LogErrorV(const char *name) {
     return nullptr;
 }
 
-llvm::Value *LogErrorB(const char *op, const char *ty1, const char *ty2) {
-    fprintf(stderr, "log-error : invalid operands to binary %s (have `%s` and `%s`)", op, ty1, ty2);
-    return nullptr;
-}
+// llvm::Value *LogErrorB(const char *op, const char *ty1, const char *ty2) {
+//     fprintf(stderr, "log-error : invalid operands to binary %s (have `%s` and `%s`)", op, ty1, ty2);
+//     return nullptr;
+// }
 
 llvm::Value *LogErrorF(const char *name) {
     fprintf(stderr, "log-error : unknown function named `%s`", name);
     return nullptr;
+}
+
+std::vector<std::string> getfun_argv(struct _ast_node *fun_decl) {
+    assert(fun_decl->node_type == FUNCTION_DECL);
+    struct _ast_node *param_list = fun_decl->children[1];   // param_list->node_type == PARAM_LIST
+    // all the child nodes of param_list are PARAM_DECL
+    std::vector<std::string> argv;
+    struct _ast_node **param_decl;
+    struct _ast_node *declarator;
+    struct _ast_node *id_decl;
+    for(param_decl = param_list->children;*param_decl != NULL;++param_decl) {
+        declarator = (*param_decl)->children[1];
+        assert(declarator);
+        // assuming that we have no function pointer being passed in our language for now we may try to extend this later
+        id_decl = declarator->children[0];
+        assert(id_decl->node_type == IDENTIFIER_DECL);
+        argv.push_back(id_decl->children[0]->node_val);
+    }
+    return argv;
 }
 
 // val1 and val2 are both integer types
@@ -98,6 +118,65 @@ inline void convert_bool(llvm::Value *val) {
     val = Builder.CreateZExtOrBitCast(val, llvm::IntegerType::get(TheContext, sizeof(int)));
 }
 
+void cast_type(llvm::Value *val, llvm::Type *Ty) {
+    auto t1 = llvm::dyn_cast<llvm::IntegerType>(val->getType());
+    auto t2 = llvm::dyn_cast<llvm::IntegerType>(Ty);    
+    if (!t1 || !t2) {
+        fprintf(stderr, "warning: type mismatch for assignment of `%s`", val->getName().str().c_str());
+        return;
+    }
+    Builder.CreateSExtOrTrunc(val, Ty);
+}
+
+bool isassign_op(enum NODE_TYPE op) {
+    switch(op) {
+        case ASSIGN:
+        case MULASSIGN:
+        case DIVASSIGN:
+        case MODASSIGN:
+        case ADDASSIGN: 
+        case SUBASSIGN:
+        case LEFTASSIGN: 
+        case RIGHTASSIGN:
+        case BITANDASSIGN:
+        case BITXORASSIGN:
+        case BITORASSIGN:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool isbin_op(enum NODE_TYPE op) {
+    switch(op) {
+        case LOR:
+        case LAND:
+        case BITOR:
+        case BITXOR:
+        case BITAND:
+        case NEQOP:
+        case EQOP:
+        case GREATEREQ:
+        case LESSEQ:
+        case GREATER_THAN:
+        case LESS_THAN:
+        case LEFT_SHIFT:
+        case RIGHT_SHIFT:
+        case PLUS:
+        case MINUS:
+        case MULT:
+        case DIV:
+        case MOD:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// ======== HELPER FUNCTIONS ========
+
+
+
 // also look for llvm::StringLiteral
 llvm::Value *constant_codegen(struct _ast_node *root) {
     assert(root->node_type == I_CONST 
@@ -119,16 +198,14 @@ llvm::Value *id_codegen(struct _ast_node *root) {
     return Builder.CreateLoad(v, root->node_val);
 }
 
-llvm::Value *binop_codegen(struct _ast_node *root) {
-    assert(root->children[0]);assert(root->children[1]);assert(!root->children[2]);
-    llvm::Value *lhs = codegen(root->children[0]);
-    llvm::Value *rhs = codegen(root->children[1]);
+
+llvm::Value *binop_codegen(llvm::Value *lhs, llvm::Value *rhs, enum NODE_TYPE op) {
     if (!lhs || !rhs) return nullptr;
     
     llvm::Value *cmp_ret;
     if (!lhs->getType()->isIntegerTy() || !rhs->getType()->isIntegerTy()) {
         // lhs or rhs is a float type
-        switch(root->node_type) {
+        switch(op) {
             case MULT:
                 return Builder.CreateFMul(lhs, rhs, "multmp");
             case DIV:
@@ -158,7 +235,7 @@ llvm::Value *binop_codegen(struct _ast_node *root) {
                 break;
             default:
                 // binary operators that are not supported
-                LogErrorB(root->node_val, type_to_str(lhs->getType()).c_str(), type_to_str(rhs->getType()).c_str());
+                // LogErrorB(op, type_to_str(lhs->getType()).c_str(), type_to_str(rhs->getType()).c_str());
                 return nullptr;
         }
         if (!cmp_ret) 
@@ -170,7 +247,7 @@ llvm::Value *binop_codegen(struct _ast_node *root) {
         make_common_type(lhs, rhs);
         // currently all operations are `signed int` operations
         // if you want to make it unsigned then you'd need to pass a symbol table for types
-        switch(root->node_type) {
+        switch(op) {
             case MULT:
                 return Builder.CreateMul(lhs, rhs, "multmp");
             case DIV:
@@ -214,49 +291,191 @@ llvm::Value *binop_codegen(struct _ast_node *root) {
                 return Builder.CreateOr(lhs, rhs, "ortemp");
             default:
                 // binop not supported
-                LogErrorB(root->node_val, type_to_str(lhs->getType()).c_str(), type_to_str(rhs->getType()).c_str());
+                // LogErrorB(root->node_val, type_to_str(lhs->getType()).c_str(), type_to_str(rhs->getType()).c_str());
                 return nullptr;
         }
     }
+}
+
+// identifier declaration node along with its type
+llvm::Value *iddecl_codegen(struct _ast_node *root, llvm::Type *Ty) {
+    assert(root->node_type == IDENTIFIER_DECL);
+    ADD_IDNODE(root, NamedValues);
+    llvm::AllocaInst *Alloca = CreateVariableAlloca(Ty, root->children[0]->node_val);
+    return Alloca;
+}
+
+// declarator : pointer direct_declarator | direct_declarator;
+llvm::Value *declarator_codegen(struct _ast_node *declarator, llvm::Type *idtype) {
+    assert(declarator->node_type == DECLARATOR);
+    struct _ast_node *direct_declarator = declarator->children[0];    // identifier_decl or function_decl
+    
+    if (direct_declarator->node_type == IDENTIFIER_DECL)
+        return iddecl_codegen(direct_declarator, idtype);
+    else 
+        // direct_declarator->node_type == FUNCTION_PTRDECL || FUNCTION_DECL
+        // in either case just generate code for function declaration
+        return function_decl_codegen(direct_declarator, idtype);
+}
+
+llvm::Value *unaryexpr_codegen(struct _ast_node *unary_expr);
+    
+llvm::Value *store_codegen(llvm::Value *left, llvm::Value *right) {
+    llvm::Value *leftval = find_symbol(NamedValues, left->getName());
+    cast_type(left, leftval->getType());
+    return Builder.CreateStore(right, left);
+}
+
+llvm::Value *expression_codegen(struct _ast_node *expression) {
+    assert(expression->node_type == EXPRESSION);
+    struct _ast_node **assign_expr;
+    std::vector<llvm::Value *> vals;
+    for(assign_expr = expression->children;*assign_expr!=NULL;++assign_expr) {
+        vals.push_back(assignexpr_codegen(*assign_expr));
+    }
+    // we got vals
+    return nullptr; // check this!!
+}
+
+llvm::Value *ternop_codegen(struct _ast_node *expr) {
+    assert(expr->node_type == TERNOP);
+    struct _ast_node *cond = expr->children[0];         // valexpr_codegen()
+    struct _ast_node *true_expr = expr->children[1];    // expression_codegen()
+    struct _ast_node *false_expr = expr->children[2];   // valexpr_codegen()
+
+    llvm::Value *cond_val = valexpr_codegen(cond);
+    llvm::Value *trueexpr_val = expression_codegen(true_expr);  // may involve assignments or just valexpr
+    llvm::Value *falseexpr_val = valexpr_codegen(false_expr);
+
+    // generate code
+}
+
+llvm::Value *valexpr_codegen(struct _ast_node *valexpr) {
+    if (valexpr->node_type == TERNOP)
+        ternop_codegen(valexpr);
+    else if (isbin_op(valexpr->node_type)) {
+        // do binary operator code gen
+    } else {
+        // else unary_expression
+        return unaryexpr_codegen(valexpr);
+    }
+    
+}
+
+llvm::Value *assignop_codegen(struct _ast_node *assign_expr) {
+    struct _ast_node *unary_expr = assign_expr->children[0];
+    struct _ast_node *assign_expr1 = assign_expr->children[1];
+    llvm::Value *left = unaryexpr_codegen(unary_expr);
+    llvm::Value *right = assignexpr_codegen(assign_expr1);
+    enum NODE_TYPE op;
+    switch(assign_expr->node_type) {
+        case MULASSIGN:
+            op = MULT;break;
+        case DIVASSIGN:
+            op = DIV;break;
+        case MODASSIGN:
+            op = MOD;break;
+        case ADDASSIGN: 
+            op = PLUS;break;
+        case SUBASSIGN:
+            op = MINUS;break;
+        case LEFTASSIGN: 
+            op = LEFT_SHIFT;break;
+        case RIGHTASSIGN:
+            op = RIGHT_SHIFT;break;
+        case BITANDASSIGN:
+            op = BITAND;break;
+        case BITXORASSIGN:
+            op = BITXOR;break;
+        case BITORASSIGN:
+            op = BITOR;break;
+    }
+    if (op!=ASSIGN)
+        right = binop_codegen(left, right, op);
+    return store_codegen(left, right);
+}
+
+llvm::Value *assignexpr_codegen(struct _ast_node *assign_expr) {
+    bool isval_expr = !isassign_op(assign_expr->node_type);
+    if (!isval_expr) {
+        return assignop_codegen(assign_expr);
+    } else {
+        // valexpr
+        return valexpr_codegen(assign_expr);
+    }
+}
+
+llvm::Value *initializer_codegen(struct _ast_node *initializer) {
+    assert(initializer->node_type == INIT_ASSIGN_EXPR || initializer->node_type == INIT_LIST);
+    if (initializer->node_type == INIT_LIST) {
+        fprintf(stderr, "warning: initializer lists are not handled");
+        return nullptr;
+    } else {
+        // intializer->node_type == INIT_ASSIGN_EXPR
+        struct _ast_node *assign_expr = initializer->children[0];
+        return assignexpr_codegen(assign_expr);
+    }
+}
+
+std::vector<llvm::Value *> initdecl_list_codegen(struct _ast_node *init_decl_list, struct _ast_node *decl_spec) {
+    std::vector<llvm::Value *> vals;
+    if (!init_decl_list) {
+        fprintf(stderr, "warning: useless type name in empty declaration");
+    } else {
+        struct _ast_node **init_decl;
+        struct _ast_node *declarator;
+        struct _ast_node *initializer;
+        struct _ast_node *ptr;
+        for(init_decl = init_decl_list->children;*init_decl!=NULL;init_decl++) {
+            // each child of *init_decl is either declarator or initializer
+            declarator = (*init_decl)->children[0];
+            initializer = (*init_decl)->children[1];
+
+            ptr = declarator->children[1];
+            llvm::Type *idtype = get_type(decl_spec, ptr);
+            llvm::Value *declarator_value = declarator_codegen(declarator, idtype);
+            // direct_declarator->node_type == FUNCTION_PTRDECL || IDENTIFIER_DECL
+            if (initializer) {
+                llvm::Value *initializer_value = initializer_codegen(initializer);
+                if (auto func = llvm::dyn_cast<llvm::Function>(declarator_value)) {
+                    fprintf(stderr, "error: cannot initalize function declarations\n");
+                    exit(1);
+                } else if (auto globalvar = llvm::dyn_cast<llvm::GlobalVariable>(declarator_value)) {
+                    if (auto constval = llvm::dyn_cast<llvm::Constant>(initializer_value)) {
+                        globalvar->setInitializer(constval);
+                        vals.push_back(declarator_value);
+                    }
+                    else {
+                        fprintf(stderr, "error: initializer element is not constant");
+                        exit(1);
+                    }
+                } else {
+                    // local variable declaration
+                    Builder.CreateStore(initializer_value, declarator_value);
+                    vals.push_back(declarator_value);
+                }
+            }
+
+        }
+    }
+    return vals;
+}
+
+llvm::Value *declaration_codegen(struct _ast_node *declaration) {
+    assert(declaration->node_type == DECLARATION);
+    struct _ast_node *decl_spec = declaration->children[0];
+    struct _ast_node *init_decl_list = declaration->children[1];
+    
+    std::vector<llvm::Value *> vals = initdecl_list_codegen(init_decl_list, decl_spec);
+    return nullptr; // doesn't really signify failure
 }
 
 llvm::Value *blkitem_codegen(struct _ast_node *root) {
     // root is child node if blkitem_list
     switch(root->node_type) {
         // declaration
-        case DECL: {
-            struct _ast_node *decl_spec = root->children[0];
-            struct _ast_node *init_decl_list = root->children[1];
-            if (!init_decl_list) {
-                fprintf(stderr, "warning: useless type name in empty declaration");
-            } else {
-                struct _ast_node **init_decl;
-                struct _ast_node *declarator;
-                struct _ast_node *initializer;
-                struct _ast_node *direct_declarator;
-                struct _ast_node *ptr;
-                for(init_decl = init_decl_list->children;*init_decl!=NULL;init_decl++) {
-                    // each child of *init_decl is either declarator or initializer
-                    declarator = (*init_decl)->children[0];
-                    initializer = (*init_decl)->children[1];
-
-                    direct_declarator = declarator->children[0];    // identifier_decl or function_decl
-                    // cannot be a function declarator inside a function itself
-                    if (direct_declarator->node_type == FUNCTION_DECL) {
-                        fprintf(stderr, "error: function cannot be declared inside any '{' '}'");
-                        return nullptr;
-                    }
-                    // direct_declarator->node_type == IDENTIFIER_DECL
-
-                    ptr = declarator->children[1];  // could be null
-                    
-                    if (!initializer) {
-                        // initializer is null
-                    } else {
-                        // initializer in not null
-                    }
-                }
-            }
+        case DECLARATION: {
+            declaration_codegen(root);
             break;
         }
         // statement
@@ -296,15 +515,6 @@ llvm::Value *cmpd_stmt_codegen(struct _ast_node *root) {
     return nullptr; // doesn't really have a significance
 }
 
-
-// identifier declaration node along with its type
-llvm::Value *id_decl_codegen(struct _ast_node *root, llvm::Type *Ty) {
-    assert(root->node_type == IDENTIFIER_DECL);
-    ADD_IDNODE(root, NamedValues);
-    llvm::AllocaInst *Alloca = CreateVariableAlloca(Ty, root->children[0]->node_val);
-    return Alloca;
-}
-
 // callee side code
 llvm::Value *function_call_codegen(struct _ast_node *root) {
     assert(root->node_type == FUNCTION_CALL);
@@ -333,7 +543,7 @@ llvm::Value *function_call_codegen(struct _ast_node *root) {
 } 
 
 // get return type of function_decl from DECL node (you cannot get it from function_decl)
-llvm::Function *function_decl_codegen(struct _ast_node *root, llvm::Type *retty, std::vector<std::string> &argv) {
+llvm::Function *function_decl_codegen(struct _ast_node *root, llvm::Type *retty) {
     assert(root->node_type == FUNCTION_DECL);
     struct _ast_node *param_list = root->children[1];   // node->type == PARAM_LIST
     std::vector<llvm::Type *> argtypes;
@@ -356,6 +566,8 @@ llvm::Function *function_decl_codegen(struct _ast_node *root, llvm::Type *retty,
                                           TheModule.get());
     // to continue:
     // set names for all the arguments from the argument vector (argv)
+    std::vector<std::string> argv = getfun_argv(root);
+
     unsigned idx = 0;
     for(auto &Arg : F->args()) {
         // assert(argv[idx]);
@@ -373,25 +585,12 @@ llvm::Function *function_def_codegen(struct _ast_node *root) {
     struct _ast_node *prototype = root->children[1];        // prototype->node_type == DECLARATOR
     struct _ast_node *retptr = prototype->children[1];      // retptr->node_type == PTR
     struct _ast_node *fun_decl = prototype->children[0];    // fun_decl->node_type == FUNCTION_DECL
-    struct _ast_node *param_list = fun_decl->children[1];   // param_list->node_type == PARAM_LIST
-    // all the child nodes of param_list are PARAM_DECL
-    std::vector<std::string> argv;
-    struct _ast_node **param_decl;
-    struct _ast_node *declarator;
-    struct _ast_node *id_decl;
-    for(param_decl = param_list->children;*param_decl != NULL;++param_decl) {
-        declarator = (*param_decl)->children[1];
-        assert(declarator);
-        // assuming that we have no function pointer being passed in our language for now we may try to extend this later
-        id_decl = declarator->children[0];
-        assert(id_decl->node_type == IDENTIFIER_DECL);
-        argv.push_back(id_decl->children[0]->node_val);
-    }
+
     const char *fun_name = fun_decl->children[0]->node_val;
     llvm::Function *TheFunction = TheModule->getFunction(fun_name);
     llvm::Type *rettype = get_type(decl_spec, retptr);
     if (!TheFunction)
-        TheFunction = function_decl_codegen(fun_decl, rettype, argv); // prototype needs to be generated with named arguments
+        TheFunction = function_decl_codegen(fun_decl, rettype); // prototype needs to be generated with named arguments
     if (!TheFunction) 
         return nullptr;
     if (!TheFunction->empty()) {
