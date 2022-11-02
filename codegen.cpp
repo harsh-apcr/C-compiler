@@ -22,7 +22,8 @@
 #include "llvm/IR/Verifier.h"
 
 
-#define zero_val llvm::ConstantInt::get(TheContext, llvm::APInt(sizeof(int), "0", 10))
+#define ZERO_VAL llvm::ConstantInt::get(TheContext, llvm::APInt(sizeof(int), "0", 10))
+#define ONE_VAL llvm::ConstantInt::get(TheContext, llvm::APInt(sizeof(int), "1", 10))
 // zero_val is llvm::Value*
 
 static llvm::LLVMContext TheContext;
@@ -114,7 +115,7 @@ void make_common_type(llvm::Value *val1, llvm::Value *val2) {
 }
 
 inline void convert_bool(llvm::Value *val) {
-    val = Builder.CreateICmpEQ(val, zero_val);
+    val = Builder.CreateICmpEQ(val, ZERO_VAL);
     val = Builder.CreateZExtOrBitCast(val, llvm::IntegerType::get(TheContext, sizeof(int)));
 }
 
@@ -173,6 +174,8 @@ bool isbin_op(enum NODE_TYPE op) {
     }
 }
 
+std::string optostr(enum NODE_TYPE op);
+
 // ======== HELPER FUNCTIONS ========
 
 
@@ -198,6 +201,12 @@ llvm::Value *id_codegen(struct _ast_node *root) {
     return Builder.CreateLoad(v, root->node_val);
 }
 
+llvm::Value *binop_codegen(struct _ast_node *left, struct _ast_node *right, enum NODE_TYPE op) {
+    // do binary operator codegen
+    llvm::Value *lhs = valexpr_codegen(left);
+    llvm::Value *rhs = valexpr_codegen(right);
+    binop_codegen(lhs, rhs, op);
+}
 
 llvm::Value *binop_codegen(llvm::Value *lhs, llvm::Value *rhs, enum NODE_TYPE op) {
     if (!lhs || !rhs) return nullptr;
@@ -235,8 +244,9 @@ llvm::Value *binop_codegen(llvm::Value *lhs, llvm::Value *rhs, enum NODE_TYPE op
                 break;
             default:
                 // binary operators that are not supported
-                // LogErrorB(op, type_to_str(lhs->getType()).c_str(), type_to_str(rhs->getType()).c_str());
-                return nullptr;
+                fprintf(stderr, "error: binary operator `%s` not supported on floats\n", optostr(op));
+                exit(1);
+                return nullptr; // redundant
         }
         if (!cmp_ret) 
             return nullptr;
@@ -246,7 +256,7 @@ llvm::Value *binop_codegen(llvm::Value *lhs, llvm::Value *rhs, enum NODE_TYPE op
         // before doing any operation on them, need to convert them into same type for any llvm-opcode
         make_common_type(lhs, rhs);
         // currently all operations are `signed int` operations
-        // if you want to make it unsigned then you'd need to pass a symbol table for types
+        // TODO: make extensions to support unsigned int and its operations 
         switch(op) {
             case MULT:
                 return Builder.CreateMul(lhs, rhs, "multmp");
@@ -257,17 +267,23 @@ llvm::Value *binop_codegen(llvm::Value *lhs, llvm::Value *rhs, enum NODE_TYPE op
             case MINUS:
                 return Builder.CreateSub(lhs, rhs, "subtmp");
             case LESS_THAN:
-                return Builder.CreateICmpSLT(lhs, rhs, "lttemp");
+                return Builder.CreateZExtOrBitCast(Builder.CreateICmpSLT(lhs, rhs, "lttemp"),
+                                                     Builder.getInt32Ty());
             case GREATER_THAN:
-                return Builder.CreateICmpSGT(lhs, rhs, "gttemp");
+                return Builder.CreateZExtOrBitCast(Builder.CreateICmpSGT(lhs, rhs, "gttemp"), 
+                                                    Builder.getInt32Ty());
             case LESSEQ:
-                return Builder.CreateICmpSLE(lhs, rhs, "letemp");
+                return Builder.CreateZExtOrBitCast(Builder.CreateICmpSLE(lhs, rhs, "letemp"),
+                                                    Builder.getInt32Ty());
             case GREATEREQ:
-                return Builder.CreateICmpSGE(lhs, rhs, "getemp");
+                return Builder.CreateZExtOrBitCast(Builder.CreateICmpSGE(lhs, rhs, "getemp"),
+                                                    Builder.getInt32Ty());
             case EQOP:
-                return Builder.CreateICmpEQ(lhs, rhs, "eqtemp");
+                return Builder.CreateZExtOrBitCast(Builder.CreateICmpEQ(lhs, rhs, "eqtemp"),
+                                                    Builder.getInt32Ty());
             case NEQOP:
-                return Builder.CreateICmpNE(lhs, rhs, "netemp");
+                return Builder.CreateZExtOrBitCast(Builder.CreateICmpNE(lhs, rhs, "netemp"),
+                                                    Builder.getInt32Ty());
             case MOD:
                 return Builder.CreateSRem(lhs, rhs, "modtemp");
             case LEFT_SHIFT:
@@ -280,6 +296,7 @@ llvm::Value *binop_codegen(llvm::Value *lhs, llvm::Value *rhs, enum NODE_TYPE op
                 return Builder.CreateXor(lhs, rhs, "xortemp");
             case BITOR:
                 return Builder.CreateOr(lhs, rhs, "ortemp");
+
             // logical operators here, convert lhs/rhs value to 0 or 1 via comparison and then do bitand/bitor
             case LAND:
                 convert_bool(lhs);
@@ -291,7 +308,8 @@ llvm::Value *binop_codegen(llvm::Value *lhs, llvm::Value *rhs, enum NODE_TYPE op
                 return Builder.CreateOr(lhs, rhs, "ortemp");
             default:
                 // binop not supported
-                // LogErrorB(root->node_val, type_to_str(lhs->getType()).c_str(), type_to_str(rhs->getType()).c_str());
+                fprintf(stderr, "error: binary operator `%s` not supported on integers\n", optostr(op));
+                exit(1);
                 return nullptr;
         }
     }
@@ -318,12 +336,125 @@ llvm::Value *declarator_codegen(struct _ast_node *declarator, llvm::Type *idtype
         return function_decl_codegen(direct_declarator, idtype);
 }
 
-llvm::Value *unaryexpr_codegen(struct _ast_node *unary_expr);
+
+llvm::Value *preincdecop_codegen(struct _ast_node *unary_expr, enum NODE_TYPE op) {
+    llvm::Value *expr_val = unaryexpr_codegen(unary_expr);
+    switch (op) {
+        case PREINC_OP: {
+            llvm::Value *new_val = binop_codegen(expr_val, ONE_VAL, NODE_TYPE::PLUS);
+            store_codegen(expr_val, new_val);
+            return new_val;
+        }
+        case PREDEC_OP: {
+            llvm::Value *new_val = binop_codegen(expr_val, ONE_VAL, NODE_TYPE::MINUS);
+            store_codegen(expr_val, new_val);
+            return new_val;
+        }
+    }
+}
+
+llvm::Value *unaryop_codegen(struct _ast_node *unaryexpr, enum NODE_TYPE op) {
+    switch (op) {
+        case ADDR_OP:
+        case DEREF_OP:
+            fprintf(stderr, "reference and de-reference operators are not supported\n");
+            exit(1);
+            return nullptr;
+        case UNPLUS:
+            return unaryexpr_codegen(unaryexpr);
+        case UNMINUS:
+            return binop_codegen(ZERO_VAL, unaryexpr_codegen(unaryexpr), NODE_TYPE::MINUS);
+        case BIT_COMP:
+            return binop_codegen(llvm::ConstantInt::get(TheContext, llvm::APInt(sizeof(int), "-1", 10)), 
+                                unaryexpr_codegen(unaryexpr),
+                                NODE_TYPE::BITXOR);
+        case NOT:
+            return binop_codegen(ZERO_VAL, unaryexpr_codegen(unaryexpr), NODE_TYPE::EQOP);
+        default:
+            fprintf(stderr, "error: unary operator is unknown\n");
+            exit(1);
+            return nullptr;
+    }
+}
+
+// inc/dec the passed in postfix_expr
+llvm::Value *postincdecop_codegen(struct _ast_node *postfix_expr, enum NODE_TYPE op) {
+    llvm::Value *expr_val = postfixexpr_codegen(postfix_expr);
+    switch (op) {
+        case POSTINC_OP: {
+            llvm::Value *new_val = binop_codegen(expr_val, ONE_VAL, NODE_TYPE::PLUS);
+            store_codegen(expr_val, new_val);
+            return expr_val;
+        }
+        case POSTDEC_OP: {
+            llvm::Value *new_val = binop_codegen(expr_val, ONE_VAL, NODE_TYPE::MINUS);
+            store_codegen(expr_val, new_val);
+            return expr_val;
+        }
+    }
+}
+
+llvm::Value *string_codegen(struct _ast_node *string_node) {
+    assert(string_node->node_type == NODE_TYPE::STRING);
+    // TODO: complete string codegen
+}
+
+llvm::Value *primaryexpr_codegen(struct _ast_node *primary_expr) {
+    switch(primary_expr->node_type) {
+        case ID:
+            return id_codegen(primary_expr);
+        case I_CONST:
+        case F_CONST:
+            return constant_codegen(primary_expr);
+        case STRING:
+            return string_codegen(primary_expr);
+        default:
+            // paren_expression
+            return expression_codegen(primary_expr);
+    }
+}
+
+llvm::Value *postfixexpr_codegen(struct _ast_node *postfix_expr) {
+    switch(postfix_expr->node_type) {
+        case POSTINC_OP:
+        case POSTDEC_OP:
+            return postincdecop_codegen(postfix_expr->children[0], postfix_expr->node_type);
+        case FUNCTION_CALL:
+            return function_call_codegen(postfix_expr);
+        case ARRAY_ACCESS:
+            fprintf(stderr, "error: array access is not supported\n");
+            return nullptr;
+        default:
+            return primaryexpr_codegen(postfix_expr);
+    }
+}
+
+llvm::Value *unaryexpr_codegen(struct _ast_node *unary_expr) {
+    switch(unary_expr->node_type) {
+        // preinc/dec operator
+        case PREINC_OP:
+        case PREDEC_OP:
+            return preincdecop_codegen(unary_expr->children[0], unary_expr->node_type);
+        // unary operator
+        case ADDR_OP:
+        case DEREF_OP:
+        case UNPLUS:
+        case UNMINUS:
+        case BIT_COMP:
+        case NOT:
+            // pass in castexpr (which is unaryexpr itself)
+            return unaryop_codegen(unary_expr->children[0], unary_expr->node_type);
+        default:
+            // postfix expression
+            return postfixexpr_codegen(unary_expr);
+    }
+}
     
-llvm::Value *store_codegen(llvm::Value *left, llvm::Value *right) {
-    llvm::Value *leftval = find_symbol(NamedValues, left->getName());
-    cast_type(left, leftval->getType());
-    return Builder.CreateStore(right, left);
+llvm::Value *store_codegen(llvm::Value *to, llvm::Value *from) {
+    llvm::Value *toval = find_symbol(NamedValues, to->getName());
+    cast_type(to, toval->getType());
+    Builder.CreateStore(from, to);
+    return from;
 }
 
 llvm::Value *expression_codegen(struct _ast_node *expression) {
@@ -333,10 +464,10 @@ llvm::Value *expression_codegen(struct _ast_node *expression) {
     for(assign_expr = expression->children;*assign_expr!=NULL;++assign_expr) {
         vals.push_back(assignexpr_codegen(*assign_expr));
     }
-    // we got vals
-    return nullptr; // check this!!
+    return vals.back(); // value of the last assign_expr is the value of the expression
 }
 
+// TODO : complete the implementation
 llvm::Value *ternop_codegen(struct _ast_node *expr) {
     assert(expr->node_type == TERNOP);
     struct _ast_node *cond = expr->children[0];         // valexpr_codegen()
@@ -344,22 +475,30 @@ llvm::Value *ternop_codegen(struct _ast_node *expr) {
     struct _ast_node *false_expr = expr->children[2];   // valexpr_codegen()
 
     llvm::Value *cond_val = valexpr_codegen(cond);
-    llvm::Value *trueexpr_val = expression_codegen(true_expr);  // may involve assignments or just valexpr
-    llvm::Value *falseexpr_val = valexpr_codegen(false_expr);
+    
+    // constant folding optimization
+    if (auto *const_val = llvm::dyn_cast<llvm::Constant>(cond_val)) {
+        if (const_val->isZeroValue()) 
+            return valexpr_codegen(false_expr);
+        else 
+            return expression_codegen(true_expr);
+    }
 
-    // generate code
+    // TODO : generate code for ternop (see code for if-else)
+    // llvm::Value *trueexpr_val = expression_codegen(true_expr);  // may involve assignments or just valexpr
+    // llvm::Value *falseexpr_val = valexpr_codegen(false_expr);
+
 }
 
 llvm::Value *valexpr_codegen(struct _ast_node *valexpr) {
     if (valexpr->node_type == TERNOP)
-        ternop_codegen(valexpr);
+        return ternop_codegen(valexpr);
     else if (isbin_op(valexpr->node_type)) {
-        // do binary operator code gen
+        return binop_codegen(valexpr->children[0], valexpr->children[1], valexpr->node_type);
     } else {
         // else unary_expression
         return unaryexpr_codegen(valexpr);
     }
-    
 }
 
 llvm::Value *assignop_codegen(struct _ast_node *assign_expr) {
@@ -516,25 +655,26 @@ llvm::Value *cmpd_stmt_codegen(struct _ast_node *root) {
 }
 
 // callee side code
-llvm::Value *function_call_codegen(struct _ast_node *root) {
-    assert(root->node_type == FUNCTION_CALL);
-    llvm::Function *CalleeF = TheModule->getFunction(root->node_val);
-    if (!CalleeF) return LogErrorV(root->node_val);
+llvm::Value *function_call_codegen(struct _ast_node *func_call) {
+    assert(func_call->node_type == FUNCTION_CALL);
+    llvm::Function *CalleeF = TheModule->getFunction(func_call->children[0]->node_val);
+    if (!CalleeF) 
+        return LogErrorV(func_call->node_val);
 
     // check for argument mismatch
-    struct _ast_node *arg_list = root->children[1];   // node->type = ARG_EXP_LIST
+    struct _ast_node *arg_list = func_call->children[1];   // arg_list->node_type = ARG_EXP_LIST
     int num_args = 0;
     if (arg_list) 
         for(num_args = 0;arg_list->children[num_args] != NULL;num_args++);
 
     if (num_args != CalleeF->arg_size()) {
-        fprintf(stderr, "log-error: invalid number arguments passed");
+        fprintf(stderr, "error: invalid number arguments passed to `%s`\n", func_call->children[0]->node_val);
         return nullptr;
     }
     
     std::vector<llvm::Value *> ArgsV(num_args, nullptr);
     for (unsigned int i = 0; i != num_args; ++i) {
-        ArgsV[i] = codegen(arg_list->children[i]);
+        ArgsV[i] = assignexpr_codegen(arg_list->children[i]);  // arg_list->children[i] is a node for assignment_expression
         if (!ArgsV[i])
             return nullptr;
     }
