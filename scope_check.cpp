@@ -81,7 +81,7 @@ void scope_checker(symbol_table &sym_table,label_table &label_table, struct _ast
         switch(root->node_type) {
             case ID:    // not in a declaration context
                 if (!find_symbol_bool(sym_table, root->node_val)) {
-                    fprintf(stderr, "error: undeclared variable `%s`\n", root->node_val);
+                    fprintf(stderr, "error: undeclared variable or function `%s`\n", root->node_val);
                     exit(1);
                 }
                 break;
@@ -139,7 +139,11 @@ void scope_checker(symbol_table &sym_table,label_table &label_table, struct _ast
               //  printf("exiting node-val : %s\n", root->node_val);
                 break;
             }
-            
+            case FUNCTION_PTRDECL: {
+                // root->children[0]->type == ID
+                ADD_IDNODE(root, sym_table);
+                break;
+            }
             case IDENTIFIER_DECL: {
                 // root->children[0]->type == ID
                 ADD_IDNODE(root, sym_table)

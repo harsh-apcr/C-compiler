@@ -382,7 +382,9 @@ declarator
 
 direct_declarator
 	: IDENTIFIER						{ temp[0]=NULL;temp[1]=ast_node_create(ID, $1, temp);temp[2]=NULL;$$ = ast_node_create(IDENTIFIER_DECL, "identifier_decl", temp+1); }
-	| '(' declarator ')'				{ $$ = $2; }
+	| '(' '*' IDENTIFIER ')' '(' parameter_type_list ')'			{ temp[0]=NULL;temp[1]=ast_node_create(ID, $3, temp);temp[2]=$6;temp[3]=NULL;$$ = ast_node_create(FUNCTION_PTRDECL, "function_ptrdecl", temp+1); }
+	| '(' '*' IDENTIFIER ')' '(' ')'								{ temp[0]=NULL;temp[1]=ast_node_create(ID, $3, temp);temp[2]=NULL;$$ = ast_node_create(FUNCTION_PTRDECL, "function_ptrdecl", temp+1); }
+	// we might need to support array of function pointers separately
 /*	| direct_declarator '[' ']'
 	| direct_declarator '[' '*' ']'
 	| direct_declarator '[' STATIC type_qualifier_list assignment_expression ']'
