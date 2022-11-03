@@ -31,6 +31,14 @@ static llvm::IRBuilder<> Builder(TheContext);
 static std::unique_ptr<llvm::Module> TheModule;
 static symbol_table NamedValues;
 
+static llvm::Function *CurrFunction;    // put it in all location required (namely inside function definition)
+                                        
+static label_stack LabelValues;         // for maintaining case/default statements (which might be nested)
+                                        
+static label_table LabelTable;          // for only LABELED_STMT (not for case/default)
+                                        // search for label from goto statements will only search LabelTable
+                                        // you clear label table only if you exit function definition (not neccessarily any cmpn_stmt)
+
 // ======== HELPER FUNCTIONS ========
 
 // Create and Alloca instruction in the entry block of the function. This is used for mutable variables etc.
@@ -180,17 +188,24 @@ std::string optostr(enum NODE_TYPE op);
 
 
 
-// also look for llvm::StringLiteral
 llvm::Value *constant_codegen(struct _ast_node *root) {
     assert(root->node_type == I_CONST 
         || root->node_type == F_CONST);
     
     if (root->node_type == I_CONST) {
-        return llvm::ConstantInt::get(TheContext, llvm::APInt(sizeof(int), root->node_val, 10));
+        return llvm::ConstantInt::get(TheContext, llvm::APInt(sizeof(int), atoi(root->node_val), true));
     }
     if (root->node_type == F_CONST) {
         return llvm::ConstantFP::get(TheContext, llvm::APFloat(atof(root->node_val)));
     }
+}
+
+llvm::Value *string_codegen(struct _ast_node *string_node) {
+    assert(string_node->node_type == NODE_TYPE::STRING);
+    llvm::GlobalVariable *str = Builder.CreateGlobalString(string_node->node_val);
+    std::vector<llvm::Value *> indices{ZERO_VAL, ZERO_VAL};
+    llvm::Value *ptr = Builder.CreateInBoundsGEP(str, indices);
+    return ptr; // assumed to be `signed char*`
 }
 
 // id is on stack
@@ -318,8 +333,9 @@ llvm::Value *binop_codegen(llvm::Value *lhs, llvm::Value *rhs, enum NODE_TYPE op
 // identifier declaration node along with its type
 llvm::Value *iddecl_codegen(struct _ast_node *root, llvm::Type *Ty) {
     assert(root->node_type == IDENTIFIER_DECL);
-    ADD_IDNODE(root, NamedValues);
+    ADD_IDNODE(root, NamedValues);  // NOTE: value added to symbol table varname is nullptr by def
     llvm::AllocaInst *Alloca = CreateVariableAlloca(Ty, root->children[0]->node_val);
+    add_symbol(NamedValues, root->children[0]->node_val, Alloca);   // add_idnode needs to be succeeded by these two statements
     return Alloca;
 }
 
@@ -392,11 +408,6 @@ llvm::Value *postincdecop_codegen(struct _ast_node *postfix_expr, enum NODE_TYPE
             return expr_val;
         }
     }
-}
-
-llvm::Value *string_codegen(struct _ast_node *string_node) {
-    assert(string_node->node_type == NODE_TYPE::STRING);
-    // TODO: complete string codegen
 }
 
 llvm::Value *primaryexpr_codegen(struct _ast_node *primary_expr) {
@@ -490,6 +501,7 @@ llvm::Value *ternop_codegen(struct _ast_node *expr) {
 
 }
 
+// conditional_expression codegen
 llvm::Value *valexpr_codegen(struct _ast_node *valexpr) {
     if (valexpr->node_type == TERNOP)
         return ternop_codegen(valexpr);
@@ -539,7 +551,7 @@ llvm::Value *assignexpr_codegen(struct _ast_node *assign_expr) {
     if (!isval_expr) {
         return assignop_codegen(assign_expr);
     } else {
-        // valexpr
+        // conditional_expression codegen
         return valexpr_codegen(assign_expr);
     }
 }
@@ -640,20 +652,6 @@ llvm::Value *blkitem_codegen(struct _ast_node *root) {
     }
 }
 
-llvm::Value *cmpd_stmt_codegen(struct _ast_node *root) {
-    assert(root->node_type == CMPND_STMT);
-    struct _ast_node *blk_item_list = root->children[0];
-    enter_scope(NamedValues);   // problem with enter_scope inside function_def_codegen
-    if (blk_item_list) {
-        struct _ast_node **blkitem;    // (*blk_item)->node_type == DECL or statement(lots of them)
-        for(blkitem = blk_item_list->children;*blkitem!=NULL;blkitem++) {
-            blkitem_codegen(*blkitem);
-        }
-    }
-    exit_scope(NamedValues);
-    return nullptr; // doesn't really have a significance
-}
-
 // callee side code
 llvm::Value *function_call_codegen(struct _ast_node *func_call) {
     assert(func_call->node_type == FUNCTION_CALL);
@@ -743,6 +741,7 @@ llvm::Function *function_def_codegen(struct _ast_node *root) {
 
     // Record the function arguments in the named-values map (push a new scope)
     enter_scope(NamedValues);
+    enter_scope(LabelValues);   // pushing the first label_table
     for(auto &Arg : TheFunction->args()) {
         // create an alloca instr for this variable
         llvm::AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Arg.getType(), Arg.getName());
@@ -755,7 +754,7 @@ llvm::Function *function_def_codegen(struct _ast_node *root) {
     }
 
     struct _ast_node *cmpd_stmt = root->children[2]; // cmp_stmt->node_type == CMPND_STMT
-    cmpd_stmt_codegen(cmpd_stmt);
+    cmpdstmt_codegen(cmpd_stmt, true);
     llvm::BasicBlock *insert_blk = Builder.GetInsertBlock();
 
     // insert block should not be terminated
@@ -772,9 +771,229 @@ llvm::Function *function_def_codegen(struct _ast_node *root) {
     }
 
     exit_scope(NamedValues);
+    exit_scope(LabelValues);    // now LabelValues is empty
+    LabelTable.clear();
     llvm::verifyFunction(*TheFunction);
 
     return TheFunction;
 }
+
+
+llvm::Value *constexpr_codegen(struct _ast_node *const_expr) {
+    return valexpr_codegen(const_expr);
+}
+
+// ====== statements ======
+
+llvm::BasicBlock *stmt_codegen(struct _ast_node *stmt) {
+
+}
+
+// labeled statement
+
+llvm::BasicBlock *labeledstmt_codegen(struct _ast_node *label_stmt) {
+    struct _ast_node *identifier = label_stmt->children[0];
+    struct _ast_node *statement = label_stmt->children[1];
+
+    llvm::BasicBlock *bb = llvm::BasicBlock::Create(TheContext, identifier->node_val, CurrFunction);
+    PUSH_LABEL(identifier->node_val, LabelValues, bb);
+    ADD_LABEL(identifier->node_val, LabelTable, bb);
+
+    llvm::BasicBlock *insert_blk = Builder.GetInsertBlock();
+    if (insert_blk->empty()) {
+        insert_blk->replaceAllUsesWith(bb);
+        Builder.GetInsertBlock()->eraseFromParent();
+    } else Builder.CreateBr(bb);
+
+
+    Builder.SetInsertPoint(bb);
+    stmt_codegen(statement);
+
+    return bb;
+}
+
+// case statement
+
+llvm::BasicBlock *casestmt_codegen(struct _ast_node *case_stmt) {
+    struct _ast_node *const_expr = case_stmt->children[0];
+    struct _ast_node *stmt = case_stmt->children[1];
+
+    llvm::Value *expr_val = constexpr_codegen(const_expr);
+    auto const_val = llvm::dyn_cast<llvm::ConstantInt>(expr_val);
+    
+    if (!const_val) {
+        fprintf(stderr, "case statement must be a constant integer\n");
+        exit(1);
+    }
+
+    std::string casestmt_label = "case" + const_val->getValue().toString(10, true); // only signed integers are supported
+
+    llvm::BasicBlock *bb = llvm::BasicBlock::Create(TheContext, casestmt_label, CurrFunction);
+    int ret = PUSH_LABEL_TOP(casestmt_label, LabelValues, bb);
+    if (ret == PUSH_LABEL_TOP_FAIL) {
+        fprintf(stderr, "duplicate case value `%s`", const_val->getValue().toString(10, true));
+        exit(1);
+    }
+    // ret == PUSH_LABEL_TOP_SUCCESS
+    llvm::BasicBlock *insert_blk = Builder.GetInsertBlock();
+    if (insert_blk->empty()) {
+        insert_blk->replaceAllUsesWith(bb);
+        Builder.GetInsertBlock()->eraseFromParent();
+    } else Builder.CreateBr(bb);
+    
+    Builder.SetInsertPoint(bb);
+    stmt_codegen(stmt);
+
+    return bb;
+}
+
+// default_stmt
+llvm::BasicBlock *defstmt_codegen(struct _ast_node *defstmt) {
+    struct _ast_node *stmt = defstmt->children[0];
+    
+    llvm::BasicBlock *bb = llvm::BasicBlock::Create(TheContext, "default", CurrFunction);
+    int ret = PUSH_LABEL_TOP("default", LabelValues, bb);
+    if (ret == PUSH_LABEL_TOP_FAIL) {
+        fprintf(stderr, "multiple default labels in one switch\n");
+        exit(1);
+    }
+    // ret == PUSH_LABEL_TOP_SUCCESS
+    llvm::BasicBlock *insert_blk = Builder.GetInsertBlock();
+    if (insert_blk->empty()) {
+        insert_blk->replaceAllUsesWith(bb);
+        Builder.GetInsertBlock()->eraseFromParent();
+    } else Builder.CreateBr(bb);
+    
+    Builder.SetInsertPoint(bb);
+    stmt_codegen(stmt);
+
+    return bb;
+}
+
+// compound_statement
+
+void cmpdstmt_codegen(struct _ast_node *root, bool is_fundef) {
+    assert(root->node_type == CMPND_STMT);
+    struct _ast_node *blk_item_list = root->children[0];
+    if (!is_fundef) {
+        enter_scope(NamedValues);
+        enter_scope(LabelValues);
+    }
+    if (blk_item_list) {
+        struct _ast_node **blkitem;    // (*blk_item)->node_type == DECL or statement(lots of them)
+        for(blkitem = blk_item_list->children;*blkitem!=NULL;blkitem++) {
+            blkitem_codegen(*blkitem);
+        }
+    }
+    if (!is_fundef) {
+        exit_scope(NamedValues);
+        exit_scope(LabelValues);
+    }
+    
+}
+
+// expression_statement
+
+void expressionstmt_codegen(struct _ast_node *expr_stmt) {
+    struct _ast_node *expr = expr_stmt->children[0];
+    if (expr) expression_codegen(expr);
+}
+
+// selection_statement
+
+void selectstmt_codegen(struct _ast_node *select_stmt) {
+
+}
+
+// if else statement
+// for both IF_ELSE_STMT and IF_STMT
+void ifelsestmt_codegen(struct _ast_node *ifelse_stmt) {
+    assert(ifelse_stmt->node_type == NODE_TYPE::IF_ELSE_STMT 
+        || ifelse_stmt->node_type == NODE_TYPE::IF_STMT);
+
+    struct _ast_node *cond = ifelse_stmt->children[0];  // expression
+    struct _ast_node *thenstmt = ifelse_stmt->children[1];  // statement
+    struct _ast_node *elsestmt = ifelse_stmt->children[2];  // statement
+
+    llvm::Value *cond_val = expression_codegen(cond);
+    assert(cond_val && "cannot compute expression");
+
+    // constant folding optimization
+    auto const_cond_val = llvm::dyn_cast<llvm::Constant>(cond_val);
+    if (const_cond_val) {
+        if (const_cond_val->isZeroValue()) {
+            if (!elsestmt) return;
+            else
+                stmt_codegen(elsestmt);
+        } else {
+            assert(thenstmt && "then statement must not be null");
+            stmt_codegen(thenstmt);
+        }
+        return;
+    }
+
+    cond_val = binop_codegen(cond_val, ZERO_VAL, NODE_TYPE::NEQOP);
+
+    llvm::BasicBlock *then_bb = llvm::BasicBlock::Create(TheContext, "then", CurrFunction);
+    llvm::BasicBlock *else_bb;
+    llvm::BasicBlock *merge_bb = llvm::BasicBlock::Create(TheContext, "ifcont");
+
+    if (elsestmt)
+        else_bb = llvm::BasicBlock::Create(TheContext, "else");
+    else
+        else_bb = merge_bb;
+
+    Builder.CreateCondBr(cond_val, then_bb, else_bb);
+    // emit then block
+    Builder.SetInsertPoint(then_bb);
+    stmt_codegen(thenstmt);
+    if (!Builder.GetInsertBlock()->getTerminator()) {
+        Builder.CreateBr(merge_bb);
+    }
+
+    // emit else block (if elsestmt is null then we push_back the merge_bb)
+    CurrFunction->getBasicBlockList().push_back(else_bb);
+    if (elsestmt) {
+        Builder.SetInsertPoint(else_bb);
+        stmt_codegen(elsestmt);
+        if (!Builder.GetInsertBlock()->getTerminator()) {
+            Builder.CreateBr(merge_bb);
+        }
+
+        CurrFunction->getBasicBlockList().push_back(merge_bb);
+
+    }
+    Builder.SetInsertPoint(merge_bb);
+}
+
+// switch statement
+void switchstmt_codegen(struct _ast_node *switch_stmt) {
+    assert(switch_stmt->node_type == NODE_TYPE::SWITCH_STMT);
+    struct _ast_node *switch_expr = switch_stmt->children[0];   // expression (constant-expression)
+    struct _ast_node *switch_stmt = switch_stmt->children[1];   // statement
+
+    llvm::Value *switchexpr_val = expression_codegen(switch_expr);
+    auto switch_end = llvm::BasicBlock::Create(TheContext, "switch_end");
+    Builder.CreateSwitch(switchexpr_val, switch_end);
+
+    auto switch_new = llvm::BasicBlock::Create(TheContext, "switch_new", CurrFunction);
+
+    Builder.SetInsertPoint(switch_new);
+    // continue later
+}
+
+// iteration statement
+
+void iterationstmt_codegen(struct _ast_node *it_stmt);
+
+void whilestmt_codegen(struct _ast_node *while_stmt) {
+
+}
+
+void forstmt1_codegen(struct _ast_node *for_stmt1) {
+
+}
+
+// jump statement
 
 
