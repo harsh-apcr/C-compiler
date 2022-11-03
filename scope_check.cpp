@@ -39,8 +39,21 @@ void add_symbol(symbol_table& sym_table, const std::string& symbol, llvm::Alloca
     sym_table.back().insert({symbol, alloca});
 }
 
-// add a label to your label_table
-void add_label(label_table &label_table, const std::string& symbol, llvm::BasicBlock *bb) {
+// add a label to your label_table (before adding a label, it is assumed that a check is performed first)
+void add_label(label_table &label_table, const std::string& symbol, llvm::BasicBlock *bb,
+                 std::unordered_multimap<std::string, llvm::BranchInst *> &notfound_labels,
+                 bool cgen) {
+
+    if (notfound_labels.find(symbol) != notfound_labels.end()) {
+        // goto to this label has been checked previously
+        if (cgen) {
+            auto range = notfound_labels.equal_range(symbol);
+            for(auto it = range.first;it!=range.second;it++) {
+                it->second->setSuccessor(0, bb);
+            }
+        }
+        notfound_labels.erase(symbol);
+    }
     label_table.insert({symbol, bb});
 }
 
@@ -49,9 +62,19 @@ bool check_scope(const symbol_table& sym_table, const std::string& symbol) {
     return (sym_table.back().find(symbol) != sym_table.back().end()); 
 }
 
-// check if the label has already been defined
 bool check_label(const label_table &label_table, const std::string &symbol) {
     return (label_table.find(symbol) != label_table.end());
+}
+
+// check if the label has already been defined
+bool check_label(const label_table &label_table,
+                 const std::string &symbol,
+                 std::unordered_multimap<std::string, llvm::BranchInst *> &notfound_labels,
+                 llvm::BranchInst *brinst = nullptr) {
+    bool is_defined = (label_table.find(symbol) != label_table.end());
+    if (!is_defined)
+        notfound_labels.insert({symbol, brinst});
+    return is_defined;
 }
 
 void exit_scope(symbol_table& sym_table) {
@@ -73,9 +96,10 @@ void print_sym_table(symbol_table& sym_table) {
     }
 }
 
-void scope_checker(symbol_table &sym_table,label_table &label_table, struct _ast_node *root, bool is_fun_def) {
-     //   printf("entering node-val : %s\n", root->node_val);
-
+// TODO: fix these errors
+void scope_checker(symbol_table &sym_table,label_table &label_table,
+                 std::unordered_multimap<std::string, llvm::BranchInst *> &notfound_labels,
+                  struct _ast_node *root, bool is_fun_def) {
     if (root == NULL) return;
     else {
         switch(root->node_type) {
@@ -134,7 +158,7 @@ void scope_checker(symbol_table &sym_table,label_table &label_table, struct _ast
             case FOR_STMT4:
             case RETURN_STMT2: {
                 for(struct _ast_node** child = root->children;*child!=NULL;child++) {
-                    scope_checker(sym_table, label_table, *child, is_fun_def);
+                    scope_checker(sym_table, label_table, notfound_labels, *child, is_fun_def);
                 }
               //  printf("exiting node-val : %s\n", root->node_val);
                 break;
@@ -164,7 +188,7 @@ void scope_checker(symbol_table &sym_table,label_table &label_table, struct _ast
                     printf("entered scope -function_decl\n");
                     enter_scope(sym_table);
                     if (param_type_list != NULL)
-                        scope_checker(sym_table, label_table, param_type_list, true);   // handel this case
+                        scope_checker(sym_table, label_table, notfound_labels, param_type_list, true);   // handel this case
                 }
                 break;
             }
@@ -172,7 +196,7 @@ void scope_checker(symbol_table &sym_table,label_table &label_table, struct _ast
             case PARAM_LIST: {
                 if (is_fun_def) {
                     for(struct _ast_node** child = root->children;*child!=NULL;child++) {
-                        scope_checker(sym_table, label_table, *child, is_fun_def);
+                        scope_checker(sym_table, label_table, notfound_labels, *child, is_fun_def);
                     }
                 }
                 break;
@@ -186,22 +210,22 @@ void scope_checker(symbol_table &sym_table,label_table &label_table, struct _ast
                         exit(1);
                     } else {
                         // declarator node is not null
-                        scope_checker(sym_table, label_table, root->children[1], true);
+                        scope_checker(sym_table, label_table, notfound_labels, root->children[1], true);
                     }
                 }
                 break;
             }
             case LABELED_STMT: {
-                ADD_LABEL(root->children[0]->node_val, label_table, nullptr);
+                ADD_LABEL(root->children[0]->node_val, label_table, nullptr, notfound_labels, false);
                 struct _ast_node *statement = root->children[1];
-                scope_checker(sym_table, label_table, statement, false);
+                scope_checker(sym_table, label_table, notfound_labels, statement, false);
                 break;
             }
             // new scope starts here
             case CMPND_STMT: {
                 if (!is_fun_def) { printf("entered scope -cmpd_stmt\n");enter_scope(sym_table);}
                 if (root->children[0] != NULL) {
-                    scope_checker(sym_table, label_table, root->children[0], false);
+                    scope_checker(sym_table, label_table, notfound_labels, root->children[0], false);
                     // root->children[0] is a node of type block_item_list
                 }
                 printf("exiting scope -cmpd_stmt\n");
@@ -210,23 +234,20 @@ void scope_checker(symbol_table &sym_table,label_table &label_table, struct _ast
             }
             case GOTO_STMT: {
                 struct _ast_node *id_node = root->children[0];  // get the label identifier
-                if (!check_label(label_table, id_node->node_val)) {
-                    // label is not defined before
-                    fprintf(stderr, "error: label `%s` used but not defined\n", id_node->node_val);
-                    exit(1);
-                }
-                // label has been defined before
+                check_label(label_table, id_node->node_val, notfound_labels);
                 break;
             }
             case TRANSLATION_UNIT: {
                 assert(label_table.empty());
+                assert(notfound_labels.empty());
                 assert(sym_table.empty());
                 printf("entered scope -translation_unit\n");
                 enter_scope(sym_table); // enter a new scope (external scope)
                 for(struct _ast_node** child = root->children;*child!=NULL;child++) {
-                    scope_checker(sym_table, label_table, *child, false);
+                    scope_checker(sym_table, label_table, notfound_labels, *child, false);
                 }
                 assert(label_table.empty());
+                assert(notfound_labels.empty());
                 printf("exiting scope - translation_unit\n");
                 exit_scope(sym_table);
                 break;
@@ -235,13 +256,18 @@ void scope_checker(symbol_table &sym_table,label_table &label_table, struct _ast
             case FUNCTION_DEF: {
                 // there are no labels initially
                 assert(label_table.empty());
+                assert(notfound_labels.empty());
                 struct _ast_node* decl_spec = root->children[0];
                 struct _ast_node* declarator = root->children[1];
                 struct _ast_node* cmpd_stmt = root->children[2];
                 // no checks needed for node decl_spec
-                scope_checker(sym_table, label_table, declarator, true);
-                scope_checker(sym_table, label_table, cmpd_stmt, true); 
+                scope_checker(sym_table, label_table, notfound_labels, declarator, true);
+                scope_checker(sym_table, label_table, notfound_labels, cmpd_stmt, true); 
                 label_table.clear();
+                if (!notfound_labels.empty()) {
+                    fprintf(stderr, "error: label `%s` is used but not defined\n", notfound_labels.begin()->first.c_str());
+                    exit(1);
+                }
                 break;
             }
             default:
@@ -261,7 +287,9 @@ void scope_checking(struct _ast_node *root) {
     symbol_table sym_table;
     label_table label_table;    // one label_table inside a function scope
     // label must only be declared inside functions
-    scope_checker(sym_table, label_table, root, false);
+
+    std::unordered_multimap<std::string, llvm::BranchInst *> notfound_labels;
+    scope_checker(sym_table, label_table, notfound_labels, root, false);
 }
 
 inline void enter_scope(label_stack& label_stack) {
