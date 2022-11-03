@@ -49,6 +49,7 @@ void add_label(label_table &label_table, const std::string& symbol, llvm::BasicB
         if (cgen) {
             auto range = notfound_labels.equal_range(symbol);
             for(auto it = range.first;it!=range.second;it++) {
+                assert(it->second); // it->second is brinst (these are not null for codegen)
                 it->second->setSuccessor(0, bb);
             }
         }
