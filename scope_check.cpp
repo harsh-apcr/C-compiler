@@ -40,8 +40,8 @@ void add_symbol(symbol_table& sym_table, const std::string& symbol, llvm::Alloca
 }
 
 // add a label to your label_table
-void add_label(label_table &label_table, const std::string& symbol) {
-    label_table.insert({symbol, nullptr});
+void add_label(label_table &label_table, const std::string& symbol, llvm::BasicBlock *bb) {
+    label_table.insert({symbol, bb});
 }
 
 // checks if symbol is defined in current (top) scope, allows check for double declarations
@@ -192,14 +192,7 @@ void scope_checker(symbol_table &sym_table,label_table &label_table, struct _ast
                 break;
             }
             case LABELED_STMT: {
-                struct _ast_node *id_node = root->children[0];  // get the label identifier
-                if (check_label(label_table, id_node->node_val)) {
-                    fprintf(stderr, "label `%s` is defined more than once\n", id_node->node_val);
-                    exit(1);
-                } else {
-                    // no prev declaration of symbol in current scope
-                    add_label(label_table, id_node->node_val);
-                }
+                ADD_LABEL(root->children[0]->node_val, label_table, nullptr);
                 struct _ast_node *statement = root->children[1];
                 scope_checker(sym_table, label_table, statement, false);
                 break;
@@ -269,4 +262,36 @@ void scope_checking(struct _ast_node *root) {
     label_table label_table;    // one label_table inside a function scope
     // label must only be declared inside functions
     scope_checker(sym_table, label_table, root, false);
+}
+
+inline void enter_scope(label_stack& label_stack) {
+    label_table new_table;
+    label_stack.push_back(new_table);
+}
+
+inline llvm::BasicBlock *find_label_top(const label_stack &label_stack, const std::string &label_name) {
+    label_table top_table = label_stack.back();
+    return top_table[label_name];   // if label_name doesn't exist as a key then returns nullptr
+}
+
+inline void push_label(label_stack &label_stack, const std::string &symbol, llvm::BasicBlock *bb) {
+    label_stack.back()[symbol] = bb;
+}
+
+inline void exit_scope(label_stack &label_stack) {
+    label_stack.pop_back();
+}
+
+llvm::BasicBlock *find_label(const label_stack &label_stack, const std::string &label_name) {
+    if (label_stack.empty()) return nullptr;
+    auto rend = label_stack.rend();
+    auto rbegin = label_stack.rbegin(); // initial top level symbol table
+    for(auto scope_itr = rbegin;scope_itr != rend;scope_itr++) {
+        if (scope_itr->find(label_name) != scope_itr->end()) {
+            // found symbol, return its value
+            return scope_itr->at(label_name);
+        }
+    }
+    // scope_itr == rend (one element past top level scope) => symbol doesn't exist in sym_table
+    return nullptr;
 }
