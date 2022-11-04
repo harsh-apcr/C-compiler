@@ -75,15 +75,62 @@ static llvm::AllocaInst *CreateVariableAlloca(llvm::Type *Ty, const std::string 
     return Builder.CreateAlloca(Ty, 0, VarName);
 }
 
+
+
+
+
+
+// ============ GETTING THE TYPE INFORMATION FROM DECLARATION_SPECIFIER ============
+
+// bool has_unsigned(struct _ast_node *decl_spec) {
+//     struct _ast_node **type_spec_qual;
+//     for(type_spec_qual = decl_spec->children;*type_spec_qual!=NULL;type_spec_qual++) {
+//         if ((*type_spec_qual)->node_type == NODE_TYPE::TYPE_UNSIGNED) {
+//             fprintf(stderr, "warning: unsigned values are just taken as signed values\n");
+//             break;
+//         }
+//     }
+// }
+
+// void consistence_check(struct _ast_node *decl_spec) {
+//     struct _ast_node **type_spec_qual;
+//     bool has_unsigned = false;
+//     bool has_signed = false;
+//     for(type_spec_qual = decl_spec->children;*type_spec_qual!=NULL;type_spec_qual++) {
+//         if ((*type_spec_qual)->node_type == NODE_TYPE::TYPE_UNSIGNED) 
+//             has_unsigned = true;
+//         if ((*type_spec_qual)->node_type == NODE_TYPE::TYPE_SIGNED)
+//             has_signed = true;
+//         if (has_signed && has_unsigned) {
+//             fprintf(stderr, "error: invalid combination of type specifiers\n");
+//             exit(1);
+//         }
+//     }
+// }
+
+// TODO: complete the implementation
 llvm::Type *get_type(struct _ast_node *decl_spec, struct _ast_node *ptr) {
     assert(decl_spec->node_type == DECLARATION_SPEC);
     assert(ptr->node_type == PTR);
 }
 
-llvm::Type *get_type_decl_spec(struct _ast_node *node) {
-    assert(node->node_type == DECLARATION_SPEC);
-    // get type from decl spec node
+// TODO: complete the implementation
+llvm::Type *get_type_decl_spec(struct _ast_node *decl_spec) {
+    assert(decl_spec->node_type == DECLARATION_SPEC);
+    // consistence_check(decl_spec);
+    // has_unsigned(decl_spec);
+
+    
 }
+
+// ============ GETTING THE TYPE INFORMATION FROM DECLARATION_SPECIFIER ============
+
+
+
+
+
+
+
 
 llvm::Value *LogErrorV(const char *name) {
     fprintf(stderr, "log-error : unknown variable named `%s`", name);
@@ -384,6 +431,10 @@ llvm::Value *binop_codegen(llvm::Value *lhs, llvm::Value *rhs, enum NODE_TYPE op
 // identifier declaration node along with its type
 llvm::Value *iddecl_codegen(struct _ast_node *root, llvm::Type *Ty) {
     assert(root->node_type == IDENTIFIER_DECL);
+    if (Ty->isVoidTy()) {
+        fprintf(stderr, "void type for variable declaration is not allowed\n");
+        exit(1);
+    }
     ADD_IDNODE(root, NamedValues);  // NOTE: value added to symbol table varname is nullptr by def
     llvm::AllocaInst *Alloca = CreateVariableAlloca(Ty, root->children[0]->node_val);
     add_symbol(NamedValues, root->children[0]->node_val, Alloca);   // add_idnode needs to be succeeded by these two statements
