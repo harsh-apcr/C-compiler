@@ -68,3 +68,8 @@ int PUSH_LABEL_TOP(const std::string &name,label_stack &label_stack, llvm::Basic
         return PUSH_LABEL_TOP_SUCCESS;
     }
 }
+
+int POP_LABEL_BLOCK(label_stack &label_stack) {
+    assert(!label_stack.empty());
+    label_stack.pop_back();
+}

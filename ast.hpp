@@ -37,6 +37,6 @@ void ast_destroy(struct _ast_node* root);
 void dump_ast(struct _ast_node* root);
 void add_children(struct _ast_node *root, struct _ast_node* child);
 void scope_checking(struct _ast_node *root);
-llvm::Value *codegen(struct _ast_node* root); 
+void codegen(struct _ast_node* root); 
 
 #endif  // _AST_H__
