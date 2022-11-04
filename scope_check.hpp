@@ -69,7 +69,7 @@ int PUSH_LABEL_TOP(const std::string &name,label_stack &label_stack, llvm::Basic
     }
 }
 
-int POP_LABEL_BLOCK(label_stack &label_stack) {
+void POP_LABEL_BLOCK(label_stack &label_stack) {
     assert(!label_stack.empty());
     label_stack.pop_back();
 }
