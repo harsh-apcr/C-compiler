@@ -44,7 +44,7 @@ static int check_type(void);
 "break"					{ return(BREAK); }
 "case"					{ return(CASE); }
 "char"					{ return(CHAR); }
-"const"					{ yylval.sval = strdup(yytext); return(CONST); }
+"const"					{ return(CONST); }
 "continue"				{ return(CONTINUE); }
 "default"				{ return(DEFAULT); }
 "do"					{ return(DO); }
@@ -60,7 +60,7 @@ static int check_type(void);
 "int"					{ return(INT); }
 "long"					{ return(LONG); }
 "register"				{ return(REGISTER); }
-"restrict"				{ yylval.sval = strdup(yytext); return(RESTRICT); }
+"restrict"				{ return(RESTRICT); }
 "return"				{ return(RETURN); }
 "short"					{ return(SHORT); }
 "signed"				{ return(SIGNED); }
@@ -72,11 +72,11 @@ static int check_type(void);
 "union"					{ return(UNION); }
 "unsigned"				{ return(UNSIGNED); }
 "void"					{ return(VOID); }
-"volatile"				{ yylval.sval = strdup(yytext); return(VOLATILE); }
+"volatile"				{ return(VOLATILE); }
 "while"					{ return(WHILE); }
 "_Alignas"                              { return ALIGNAS; }
 "_Alignof"                              { return ALIGNOF; }
-"_Atomic"                               { yylval.sval = strdup(yytext); return ATOMIC; }
+"_Atomic"                               { return ATOMIC; }
 "_Bool"                                 { return BOOL; }
 "_Complex"                              { return COMPLEX; }
 "_Generic"                              { return GENERIC; }

@@ -20,7 +20,7 @@ extern struct _ast_node *root;
 
 %code {
 #include "ast.hpp"
-struct _ast_node* temp[5];
+struct _ast_node* temp[8];
 struct _ast_node *root;
 }
 
@@ -87,12 +87,10 @@ string
 generic_selection
 	: GENERIC '(' assignment_expression ',' generic_assoc_list ')'
 	;
-
 generic_assoc_list
 	: generic_association
 	| generic_assoc_list ',' generic_association
 	;
-
 generic_association
 	: type_name ':' assignment_expression
 	| DEFAULT ':' assignment_expression
@@ -242,14 +240,15 @@ declaration
 	| declaration_specifiers
 	;
 */
+
 declaration_specifiers
 	/* storage_class_specifier declaration_specifiers
 	| storage_class_specifier
 	*/
-	: type_specifier declaration_specifiers		{ add_children($2, $1); $$ = $2;}
-	| type_specifier							{ temp[0]=$1;temp[1]=NULL;ast_node_create(DECLARATION_SPEC, "declaration_spec", temp);}
-	| type_qualifier declaration_specifiers		{ add_children($2, $1); $$ = $2;}
-	| type_qualifier							{ temp[0]=$1;temp[1]=NULL;ast_node_create(DECLARATION_SPEC, "declaration_spec", temp);}
+	: type_specifier declaration_specifiers		{ add_typespec($2->children[0], $1); $$ = $2;}
+	| type_specifier							{ temp[0]=$1;temp[1]=NULL;temp[2]=ast_node_create(TYPE_SPECIFIER, "type_specifier", temp);temp[3]=ast_node_create(TYPE_QUAL_LIST, "type_qual_list", temp+1);temp[4]=NULL;$$ = ast_node_create(DECLARATION_SPEC, "declaration_spec", temp + 2);}
+	| type_qualifier declaration_specifiers		{ add_typequal($2->children[1], $1); $$ = $2;}
+	| type_qualifier							{ temp[0]=NULL;temp[1]=$1;temp[2]=NULL;temp[3]=ast_node_create(TYPE_SPEC_EMPTY, "empty-type", temp);temp[4]=NULL;temp[5]=ast_node_create(TYPE_SPECIFIER, "type_specifier", temp+3);temp[6]=ast_node_create(TYPE_QUAL_LIST, "type_qual_list", temp+1);temp[7]=NULL;$$ = ast_node_create(DECLARATION_SPEC, "declaration_spec", temp + 5);}
 	/*| function_specifier declaration_specifiers
 	| function_specifier
 	| alignment_specifier declaration_specifiers
@@ -276,16 +275,16 @@ storage_class_specifier
 	;
 */
 type_specifier
-	: VOID											{ temp[0]=NULL;$$ = ast_node_create(TYPE_VOID, "void", temp);}
-	| CHAR											{ temp[0]=NULL;$$ = ast_node_create(TYPE_CHAR, "char", temp);}
-	| SHORT											{ temp[0]=NULL;$$ = ast_node_create(TYPE_SHORT, "short", temp);}
-	| INT											{ temp[0]=NULL;$$ = ast_node_create(TYPE_INT, "int", temp);}
-	| LONG											{ temp[0]=NULL;$$ = ast_node_create(TYPE_LONG, "long", temp);}
-	| FLOAT											{ temp[0]=NULL;$$ = ast_node_create(TYPE_FLOAT, "float", temp);}
-	| DOUBLE										{ temp[0]=NULL;$$ = ast_node_create(TYPE_DOUBLE, "double", temp);}
-	| SIGNED										{ temp[0]=NULL;$$ = ast_node_create(TYPE_SIGNED, "signed", temp);}
-	| UNSIGNED										{ temp[0]=NULL;$$ = ast_node_create(TYPE_UNSIGNED, "unsigned", temp);}
-	| BOOL											{ temp[0]=NULL;$$ = ast_node_create(TYPE_BOOL, "bool", temp);}
+	: VOID											{ temp[0]=NULL;$$ = ast_node_create(TYPE_SPEC_VOID, "void", temp);}
+	| CHAR											{ temp[0]=NULL;$$ = ast_node_create(TYPE_SPEC_CHAR, "char", temp);}
+	| SHORT											{ temp[0]=NULL;$$ = ast_node_create(TYPE_SPEC_SHORT, "short", temp);}
+	| INT											{ temp[0]=NULL;$$ = ast_node_create(TYPE_SPEC_INT, "int", temp);}
+	| LONG											{ temp[0]=NULL;$$ = ast_node_create(TYPE_SPEC_LONG, "long", temp);}
+	| FLOAT											{ temp[0]=NULL;$$ = ast_node_create(TYPE_SPEC_FLOAT, "float", temp);}
+	| DOUBLE										{ temp[0]=NULL;$$ = ast_node_create(TYPE_SPEC_DOUBLE, "double", temp);}
+	| SIGNED										{ temp[0]=NULL;$$ = ast_node_create(TYPE_SPEC_SIGNED, "signed", temp);}
+	| UNSIGNED										{ temp[0]=NULL;$$ = ast_node_create(TYPE_SPEC_UNSIGNED, "unsigned", temp);}
+	| BOOL											{ temp[0]=NULL;$$ = ast_node_create(TYPE_SPEC_BOOL, "bool", temp);}
 /*	| COMPLEX
 	| IMAGINARY	  	// non-mandated extension
 	| atomic_type_specifier
@@ -300,41 +299,34 @@ struct_or_union_specifier
 	| struct_or_union IDENTIFIER '{' struct_declaration_list '}'
 	| struct_or_union IDENTIFIER
 	;
-
 struct_or_union
 	: STRUCT
 	| UNION
 	;
-
 struct_declaration_list
 	: struct_declaration
 	| struct_declaration_list struct_declaration
 	;
-
 struct_declaration
 	: specifier_qualifier_list ';'	// for anonymous struct/union
 	| specifier_qualifier_list struct_declarator_list ';'
 	| static_assert_declaration
 	;
-
 specifier_qualifier_list
 	: type_specifier specifier_qualifier_list
 	| type_specifier
 	| type_qualifier specifier_qualifier_list
 	| type_qualifier
 	;
-
 struct_declarator_list
 	: struct_declarator
 	| struct_declarator_list ',' struct_declarator
 	;
-
 struct_declarator
 	: ':' constant_expression
 	| declarator ':' constant_expression
 	| declarator
 	;
-
 enum_specifier
 	: ENUM '{' enumerator_list '}'
 	| ENUM '{' enumerator_list ',' '}'
@@ -342,34 +334,30 @@ enum_specifier
 	| ENUM IDENTIFIER '{' enumerator_list ',' '}'
 	| ENUM IDENTIFIER
 	;
-
 enumerator_list
 	: enumerator
 	| enumerator_list ',' enumerator
 	;
-
 enumerator	// identifiers must be flagged as ENUMERATION_CONSTANT
 	: enumeration_constant '=' constant_expression
 	| enumeration_constant
 	;
-
 atomic_type_specifier
 	: ATOMIC '(' type_name ')'
 	;
 */
 
 type_qualifier
-	: CONST 				{ temp[0]=NULL;$$ = ast_node_create(TYPE_QUAL, $1, temp);}
-	| RESTRICT				{ temp[0]=NULL;$$ = ast_node_create(TYPE_QUAL, $1, temp);}		
-	| VOLATILE				{ temp[0]=NULL;$$ = ast_node_create(TYPE_QUAL, $1, temp);}
-	| ATOMIC				{ temp[0]=NULL;$$ = ast_node_create(TYPE_QUAL, $1, temp);}
+	: CONST 				{ temp[0]=NULL;$$ = ast_node_create(TYPE_QUAL_CONST, "const", temp);}
+	| RESTRICT				{ temp[0]=NULL;$$ = ast_node_create(TYPE_QUAL_RESTRICT, "restrict", temp);}		
+	| VOLATILE				{ temp[0]=NULL;$$ = ast_node_create(TYPE_QUAL_VOLATILE, "volatile", temp);}
+	| ATOMIC				{ temp[0]=NULL;$$ = ast_node_create(TYPE_QUAL_ATOMIC, "atomic", temp);}
 	;
 /*
 function_specifier
 	: INLINE
 	| NORETURN
 	;
-
 alignment_specifier
 	: ALIGNAS '(' type_name ')'
 	| ALIGNAS '(' constant_expression ')'
@@ -408,7 +396,7 @@ pointer
 
 type_qualifier_list
 	: type_qualifier						{ temp[0]=$1;temp[1]=NULL;$$ = ast_node_create(TYPE_QUAL_LIST, "type_qual_list", temp); }
-	| type_qualifier_list type_qualifier	{ add_children($1, $2); $$ = $1; }
+	| type_qualifier_list type_qualifier	{ add_typequal($1, $2); $$ = $1; }
 	;
 
 
@@ -432,18 +420,15 @@ identifier_list
 	: IDENTIFIER
 	| identifier_list ',' IDENTIFIER
 	;
-
 type_name
 	: specifier_qualifier_list abstract_declarator
 	| specifier_qualifier_list
 	;
-
 abstract_declarator
 	: pointer direct_abstract_declarator
 	| pointer
 	| direct_abstract_declarator
 	;
-
 direct_abstract_declarator
 	: '(' abstract_declarator ')'
 	| '[' ']'
@@ -484,17 +469,14 @@ initializer_list
 designation
 	: designator_list '='
 	;
-
 designator_list
 	: designator
 	| designator_list designator
 	;
-
 designator
 	: '[' constant_expression ']'
 	| '.' IDENTIFIER
 	;
-
 static_assert_declaration
 	: STATIC_ASSERT '(' constant_expression ',' STRING_LITERAL ')' ';'
 	;
