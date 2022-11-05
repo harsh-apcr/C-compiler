@@ -1,3 +1,6 @@
+#ifndef __SCOPE_CHECK_H
+#define __SCOPE_CHECK_H
+
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -68,15 +71,4 @@ llvm::BasicBlock *find_label(const label_stack &label_stack, const std::string &
 void push_label(label_stack &label_stack, const std::string &symbol, llvm::BasicBlock *bb); // push label on top of the stack
 void exit_scope(label_stack &label_stack);  // while exiting compound_stmt
 
-int PUSH_LABEL_TOP(const std::string &name,label_stack &label_stack, llvm::BasicBlock *bb) {
-    if (find_label_top(label_stack, name)) return PUSH_LABEL_TOP_FAIL;
-    else {
-        push_label(label_stack, name, bb);
-        return PUSH_LABEL_TOP_SUCCESS;
-    }
-}
-
-void POP_LABEL_BLOCK(label_stack &label_stack) {
-    assert(!label_stack.empty());
-    label_stack.pop_back();
-}
+#endif

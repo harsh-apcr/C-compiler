@@ -39,6 +39,7 @@ void dump_ast(struct _ast_node* root);
 void add_children(struct _ast_node *root, struct _ast_node* child);
 void scope_checking(struct _ast_node *root);
 void codegen(struct _ast_node* root); 
+void print_module(struct _ast_node* root, std::string &out_filename);
 
 class type_llvm {
     public:
@@ -61,6 +62,7 @@ public:
         : value_llvm(func, retty), param_tylist(param_tylist) {}
     function_llvm(llvm::Function *func, std::vector<type_llvm> &&param_tylist, type_llvm retty) 
         : value_llvm(func, retty), param_tylist(param_tylist) {}
+    function_llvm() : value_llvm(nullptr, type_llvm()), param_tylist() {}
 };
 
 void add_typespec(struct _ast_node *decl_spec, struct _ast_node *new_typespec);

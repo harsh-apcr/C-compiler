@@ -21,19 +21,22 @@
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Verifier.h"
 
-
-#define ZERO_VAL llvm::ConstantInt::get(TheContext, llvm::APInt(sizeof(int), 0))
-#define ONE_VAL llvm::ConstantInt::get(TheContext, llvm::APInt(sizeof(int), 1))
-value_llvm one_val = value_llvm(ONE_VAL, type_llvm(llvm::Type::getInt32Ty(TheContext), true));
-value_llvm zero_val = value_llvm(ZERO_VAL, type_llvm(llvm::Type::getInt32Ty(TheContext), true));
-
-// zero_val is llvm::Value*
+#include "expression_codegen.hpp"
+#include "statement_codegen.hpp"
+#include "declarator_codgen.hpp"
+#include "declarator_codgen.hpp"
+#include "blockitem_codegen.hpp"
 
 static llvm::LLVMContext TheContext;
 static llvm::IRBuilder<> Builder(TheContext);
 static std::unique_ptr<llvm::Module> TheModule;
 static symbol_table NamedValues;
 static function_table NamedFunctions;
+
+#define ZERO_VAL llvm::ConstantInt::get(TheContext, llvm::APInt(sizeof(int), 0))
+#define ONE_VAL llvm::ConstantInt::get(TheContext, llvm::APInt(sizeof(int), 1))
+value_llvm one_val = value_llvm(ONE_VAL, type_llvm(llvm::Type::getInt32Ty(TheContext), true));
+value_llvm zero_val = value_llvm(ZERO_VAL, type_llvm(llvm::Type::getInt32Ty(TheContext), true));
 
 static llvm::Function *CurrFunction;    // put it in all location required (namely inside function definition)
                                         
@@ -62,7 +65,18 @@ inline void pop_break() {
     break_dest_list.pop_back();
 }
 
+int PUSH_LABEL_TOP(const std::string &name,label_stack &label_stack, llvm::BasicBlock *bb) {
+    if (find_label_top(label_stack, name)) return PUSH_LABEL_TOP_FAIL;
+    else {
+        push_label(label_stack, name, bb);
+        return PUSH_LABEL_TOP_SUCCESS;
+    }
+}
 
+void POP_LABEL_BLOCK(label_stack &label_stack) {
+    assert(!label_stack.empty());
+    label_stack.pop_back();
+}
 
 
 
@@ -83,7 +97,29 @@ static inline llvm::AllocaInst *CreateVariableAlloca(llvm::Type *Ty, const std::
     return Builder.CreateAlloca(Ty, 0, VarName);
 }
 
+void cast_type(value_llvm &value, type_llvm type) {
+    auto ty1 = llvm::dyn_cast<llvm::IntegerType>(value.val->getType());
+    auto ty2 = llvm::dyn_cast<llvm::IntegerType>(type.Ty);    
+    if (!ty1 || !ty2) {
+        fprintf(stderr, "warning: type mismatch for assignment of `%s`", value.val->getName().str().c_str());
+        return;
+    }
+    bool is_signed = value.ty.is_signed;
+    if (is_signed)
+        value.val = Builder.CreateSExtOrTrunc(value.val, ty2);
+    else
+        value.val = Builder.CreateZExtOrTrunc(value.val, ty2);
+    // type of val has been changed accordingly
+    value.ty.is_signed = type.is_signed;
+    value.ty.Ty = value.val->getType(); // update ty as well
+}
 
+value_llvm store_codegen(value_llvm to, value_llvm from) {
+    value_llvm toval = find_symbol(NamedValues, to.val->getName());
+    cast_type(to, toval.val->getType());
+    Builder.CreateStore(from.val, to.val);
+    return from;
+}
 
 
 
@@ -118,7 +154,8 @@ llvm::Type *typespec_getllvmtype(struct _ast_node *typespec) {
         case TYPE_SPEC_LONGDOUBLE:
             return llvm::Type::getFP128Ty(TheContext);
         default:
-            fprintf(stderr, "invalid type specifier %s provided", get_nodestr(type));
+            fprintf(stderr, "invalid type specifier %s provided", get_nodestr(type).c_str());
+            exit(1);
     }
 }
 
@@ -185,23 +222,6 @@ void make_common_type(value_llvm &val1, value_llvm &val2) {
 inline void convert_bool(llvm::Value *&val) {
     val = Builder.CreateICmpEQ(val, ZERO_VAL);
     val = Builder.CreateZExtOrBitCast(val, llvm::IntegerType::get(TheContext, sizeof(int)));
-}
-
-void cast_type(value_llvm &value, type_llvm type) {
-    auto ty1 = llvm::dyn_cast<llvm::IntegerType>(value.val->getType());
-    auto ty2 = llvm::dyn_cast<llvm::IntegerType>(type.Ty);    
-    if (!ty1 || !ty2) {
-        fprintf(stderr, "warning: type mismatch for assignment of `%s`", value.val->getName().str().c_str());
-        return;
-    }
-    bool is_signed = value.ty.is_signed;
-    if (is_signed)
-        value.val = Builder.CreateSExtOrTrunc(value.val, ty2);
-    else
-        value.val = Builder.CreateZExtOrTrunc(value.val, ty2);
-    // type of val has been changed accordingly
-    value.ty.is_signed = type.is_signed;
-    value.ty.Ty = value.val->getType(); // update ty as well
 }
 
 // ============ GETTING THE TYPE INFORMATION FROM DECLARATION_SPECIFIER and PTR node ============
@@ -330,6 +350,7 @@ std::string binop_tostr(enum NODE_TYPE op) {
 // ======== HELPER FUNCTIONS ========
 
 
+
 value_llvm constant_codegen(struct _ast_node *constant) {
     assert(constant->node_type == I_CONST 
         || constant->node_type == F_CONST);
@@ -343,6 +364,7 @@ value_llvm constant_codegen(struct _ast_node *constant) {
         type_llvm ty = type_llvm(llvm::Type::getFloatTy(TheContext), false);
         return value_llvm(llvm::ConstantFP::get(TheContext, llvm::APFloat(atof(constant->node_val))), ty);
     }
+    return value_llvm();    // unreachable statement
 }
 
 value_llvm string_codegen(struct _ast_node *string_node) {
@@ -360,17 +382,6 @@ value_llvm id_codegen(struct _ast_node *id) {
     if (!v.val) LogErrorV(id->node_val);    // this check is anyway performed by scope checker
     v.val = Builder.CreateLoad(v.val, id->node_val);
     return v;
-}
-
-value_llvm binop_codegen(struct _ast_node *left, struct _ast_node *right, enum NODE_TYPE op) {
-    // do binary operator codegen
-    value_llvm lhs = valexpr_codegen(left);
-    value_llvm rhs = valexpr_codegen(right);
-    if (!lhs.val || !rhs.val) {
-        fprintf(stderr, "value could not be computed\n");
-        exit(1);
-    }
-    binop_codegen(lhs, rhs, op);
 }
 
 value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op) {
@@ -418,7 +429,7 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op) {
                 break;
             default:
                 // binary operators that are not supported
-                fprintf(stderr, "error: binary operator `%s` not supported on floats\n", binop_tostr(op));
+                fprintf(stderr, "error: binary operator `%s` not supported on floats\n", binop_tostr(op).c_str());
                 exit(1);
         }
         if (!cmp_ret.val) {
@@ -510,10 +521,21 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op) {
                 return retval;
             default:
                 // binop not supported
-                fprintf(stderr, "error: binary operator `%s` not supported on integers\n", binop_tostr(op));
+                fprintf(stderr, "error: binary operator `%s` not supported on integers\n", binop_tostr(op).c_str());
                 exit(1);
         }
     }
+}
+
+value_llvm binop_codegen(struct _ast_node *left, struct _ast_node *right, enum NODE_TYPE op) {
+    // do binary operator codegen
+    value_llvm lhs = valexpr_codegen(left);
+    value_llvm rhs = valexpr_codegen(right);
+    if (!lhs.val || !rhs.val) {
+        fprintf(stderr, "value could not be computed\n");
+        exit(1);
+    }
+    return binop_codegen(lhs, rhs, op);
 }
 
 // identifier declaration node along with its type
@@ -555,6 +577,9 @@ value_llvm preincdecop_codegen(struct _ast_node *unary_expr, enum NODE_TYPE op) 
             store_codegen(expr_val, new_val);
             return new_val;
         }
+        default:
+            fprintf(stderr, "error: unexpected node-type\n");
+            exit(1);
     }
 }
 
@@ -583,7 +608,6 @@ value_llvm unaryop_codegen(struct _ast_node *unaryexpr, enum NODE_TYPE op) {
         default:
             fprintf(stderr, "error: unknown unary operator\n");
             exit(1);
-            return nullptr;
     }
 }
 
@@ -602,6 +626,9 @@ value_llvm postincdecop_codegen(struct _ast_node *postfix_expr, enum NODE_TYPE o
             store_codegen(expr_val, new_val);
             return expr_val;
         }
+        default:
+            fprintf(stderr, "error: unknown unary operator\n");
+            exit(1);
     }
 }
 
@@ -654,13 +681,6 @@ value_llvm unaryexpr_codegen(struct _ast_node *unary_expr) {
             // postfix expression
             return postfixexpr_codegen(unary_expr);
     }
-}
-    
-value_llvm store_codegen(value_llvm to, value_llvm from) {
-    value_llvm toval = find_symbol(NamedValues, to.val->getName());
-    cast_type(to, toval.val->getType());
-    Builder.CreateStore(from.val, to.val);
-    return from;
 }
 
 value_llvm expression_codegen(struct _ast_node *expression) {
@@ -765,6 +785,8 @@ value_llvm assignop_codegen(struct _ast_node *assign_expr) {
             op = BITXOR;break;
         case BITORASSIGN:
             op = BITOR;break;
+        default:
+            fprintf(stderr, "not an assign operator\n");exit(1);
     }
     if (op!=ASSIGN)
         right = binop_codegen(left, right, op);
@@ -844,7 +866,7 @@ void declaration_codegen(struct _ast_node *declaration) {
     std::vector<value_llvm> vals = initdecl_list_codegen(init_decl_list, decl_spec);
 }
 
-value_llvm blkitem_codegen(struct _ast_node *root) {
+void blkitem_codegen(struct _ast_node *root) {
     // root is child node if blkitem_list
     switch(root->node_type) {
         // declaration
@@ -853,7 +875,6 @@ value_llvm blkitem_codegen(struct _ast_node *root) {
             break;
         default:
             stmt_codegen(root);
-            break;
         // statement
     }
 }
@@ -915,7 +936,7 @@ function_llvm function_decl_codegen(struct _ast_node *fun_decl, type_llvm retty)
         struct _ast_node *ptr_node;
         for(param_decl = param_list->children;*param_decl != NULL;param_decl++) {
             if ((*param_decl)->node_type == NODE_TYPE::ELLIPSIS_NODE) {
-                fprintf(stderr, "error: support for var-arg list is not supported for code generation\n");
+                fprintf(stderr, "error: support for var-arg list is not there for code generation\n");
                 exit(1);
             }
             decl_spec = (*param_decl)->children[0]; // (*param_decl)->children[0] is DECL_SPEC node
@@ -1116,7 +1137,7 @@ void casestmt_codegen(struct _ast_node *case_stmt) {
     llvm::BasicBlock *bb = llvm::BasicBlock::Create(TheContext, casestmt_label, CurrFunction);
     int ret = PUSH_LABEL_TOP(casestmt_label, LabelValues, bb);  // need to pop this
     if (ret == PUSH_LABEL_TOP_FAIL) {
-        fprintf(stderr, "duplicate case value `%s`", const_val->getValue().toString(10, true));
+        fprintf(stderr, "duplicate case value `%s`", const_val->getValue().toString(10, true).c_str());
         exit(1);
     }
     // ret == PUSH_LABEL_TOP_SUCCESS
@@ -1192,6 +1213,8 @@ void selectstmt_codegen(struct _ast_node *select_stmt) {
             ifelsestmt_codegen(select_stmt);
         case SWITCH_STMT:
             switchstmt_codegen(select_stmt);
+        default:
+            fprintf(stderr, "not a select statement\n");exit(1);
     }
 }
 
@@ -1256,11 +1279,11 @@ void ifelsestmt_codegen(struct _ast_node *ifelse_stmt) {
     Builder.SetInsertPoint(merge_bb);
 }
 
-// switch statement
-void switchstmt_codegen(struct _ast_node *switch_stmt) {
-    assert(switch_stmt->node_type == NODE_TYPE::SWITCH_STMT);
-    struct _ast_node *switch_expr = switch_stmt->children[0];   // expression (constant-expression)
-    struct _ast_node *switch_stmt = switch_stmt->children[1];   // statement
+// TODO: finish switch statement code-generation
+void switchstmt_codegen(struct _ast_node *switchstmt) {
+    assert(switchstmt->node_type == NODE_TYPE::SWITCH_STMT);
+    struct _ast_node *switch_expr = switchstmt->children[0];   // expression (constant-expression)
+    struct _ast_node *switch_stmt = switchstmt->children[1];   // statement
 
     value_llvm switchexpr_val = expression_codegen(switch_expr);
     auto switch_end = llvm::BasicBlock::Create(TheContext, "switch_end");
@@ -1365,7 +1388,7 @@ void dowhilestmt_codegen(struct _ast_node *dowhile_stmt) {
 }
 
 void forstmt_codegen(struct _ast_node *for_stmt) {
-    fprintf(stderr, "error: for-loops are not supported\n");
+    fprintf(stderr, "error: for-loops are not supported for code-generation\n");
     exit(1);
 }
 
@@ -1386,6 +1409,9 @@ void jumpstmt_codegen(struct _ast_node *jmp_stmt) {
         case RETURN_STMT2:
             return_codegen(jmp_stmt);
             break;
+        default:
+            fprintf(stderr, "not a jump statement\n");
+            exit(1);
     }
 }
 
@@ -1459,14 +1485,6 @@ void return_codegen(struct _ast_node *ret_stmt) {
 
 // translation-unit
 
-void translationunit_codegen(struct _ast_node *trans_unit) {
-    assert(trans_unit->node_type== NODE_TYPE::TRANSLATION_UNIT);
-    struct _ast_node **external_declaration;
-    for(external_declaration = trans_unit->children;*external_declaration!=NULL;external_declaration++) {
-        externaldecl_codegen(*external_declaration);
-    }
-}
-
 void externaldecl_codegen(struct _ast_node *extern_decl) {
     switch(extern_decl->node_type) {
         case FUNCTION_DEF:
@@ -1481,6 +1499,26 @@ void externaldecl_codegen(struct _ast_node *extern_decl) {
     }
 }
 
+void translationunit_codegen(struct _ast_node *trans_unit) {
+    assert(trans_unit->node_type== NODE_TYPE::TRANSLATION_UNIT);
+    struct _ast_node **external_declaration;
+    for(external_declaration = trans_unit->children;*external_declaration!=NULL;external_declaration++) {
+        externaldecl_codegen(*external_declaration);
+    }
+}
+
 void codegen(struct _ast_node *root) {
     translationunit_codegen(root);
+}
+
+
+void print_module(struct _ast_node *root, std::string &out_filename) {
+    codegen(root);
+    std::error_code err;
+    llvm::raw_fd_ostream file(out_filename, err);
+    if (err) {
+      printf("error occurred in opening file: %s\n", err.message().c_str());
+      exit(1);
+    }
+    TheModule->print(file, nullptr);
 }

@@ -3,6 +3,8 @@
 #include <assert.h>
 #include "c.tab.hpp"
 #include "ast.hpp"
+#include <string>
+#include "llvm/Support/raw_ostream.h"
 
 extern "C" int yylex();
 int yyparse();
@@ -31,14 +33,20 @@ main(int argc, char **argv)
   if (ret == 0) {
     struct _ast_node *root_node = get_ast_root();
     scope_checking(root_node);
-    printf("Do you want to see the AST representation (y/n)? ");
-    char c;
-    scanf("%c", &c);
-    if (c == 'y') {
-      printf("-------- ABSTRACT SYNTAX TREE -------\n");
-      dump_ast(root_node);
-      ast_destroy(root_node);   // free the memory
+    // printf("Do you want to see the AST representation (y/n)? ");
+    // char c;
+    // scanf("%c", &c);
+    // if (c == 'y' || c == 'Y' || c == '\n') {
+    //   printf("-------- ABSTRACT SYNTAX TREE -------\n");
+    //   dump_ast(root_node);
+    //   ast_destroy(root_node);   // free the memory
+    // }
+
+    // code generation
+    std::string out_filename = "out/a.ll";
+    print_module(root_node, out_filename);
+    exit(0);
     }
-  }
-  exit(0);
+
+  
 }

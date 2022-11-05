@@ -293,21 +293,21 @@ void scope_checking(struct _ast_node *root) {
     scope_checker(sym_table, label_table, notfound_labels, root, false);
 }
 
-inline void enter_scope(label_stack& label_stack) {
+void enter_scope(label_stack& label_stack) {
     label_table new_table;
     label_stack.push_back(new_table);
 }
 
-inline llvm::BasicBlock *find_label_top(const label_stack &label_stack, const std::string &label_name) {
+llvm::BasicBlock *find_label_top(const label_stack &label_stack, const std::string &label_name) {
     label_table top_table = label_stack.back();
     return top_table[label_name];   // if label_name doesn't exist as a key then returns nullptr
 }
 
-inline void push_label(label_stack &label_stack, const std::string &symbol, llvm::BasicBlock *bb) {
+void push_label(label_stack &label_stack, const std::string &symbol, llvm::BasicBlock *bb) {
     label_stack.back()[symbol] = bb;
 }
 
-inline void exit_scope(label_stack &label_stack) {
+void exit_scope(label_stack &label_stack) {
     label_stack.pop_back();
 }
 
