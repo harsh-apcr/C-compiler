@@ -40,17 +40,28 @@ void add_children(struct _ast_node *root, struct _ast_node* child);
 void scope_checking(struct _ast_node *root);
 void codegen(struct _ast_node* root); 
 
-typedef struct __type_llvm {
+class type_llvm {
+    public:
     llvm::Type *Ty;
     bool is_signed;
-    __type_llvm(llvm::Type *Ty=nullptr, bool is_signed=true) : Ty(Ty), is_signed(is_signed) {}
-} type_llvm;
+    type_llvm(llvm::Type *Ty=nullptr, bool is_signed=true) : Ty(Ty), is_signed(is_signed) {}
+};
 
-typedef struct __value_llvm {
+class value_llvm {
+public:
     llvm::Value *val;
     type_llvm ty;
-    __value_llvm(llvm::Value *val=nullptr, type_llvm ty=type_llvm()) : val(val), ty(ty) {}
-} value_llvm;
+    value_llvm(llvm::Value *val=nullptr, type_llvm ty=type_llvm()) : val(val), ty(ty) {}
+};
+
+class function_llvm : public value_llvm {
+public:
+    std::vector<type_llvm> param_tylist;
+    function_llvm(llvm::Function *func, std::vector<type_llvm> &param_tylist, type_llvm retty) 
+        : value_llvm(func, retty), param_tylist(param_tylist) {}
+    function_llvm(llvm::Function *func, std::vector<type_llvm> &&param_tylist, type_llvm retty) 
+        : value_llvm(func, retty), param_tylist(param_tylist) {}
+};
 
 void add_typespec(struct _ast_node *decl_spec, struct _ast_node *new_typespec);
 void add_typequal(struct _ast_node *typequal_list, struct _ast_node *typequal);

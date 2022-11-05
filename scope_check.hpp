@@ -13,6 +13,7 @@
 typedef std::vector<std::unordered_map<std::string, value_llvm>> symbol_table;    // stack of scopes
 typedef std::unordered_map<std::string, llvm::BasicBlock*> label_table;
 typedef std::vector<label_table> label_stack;
+typedef std::unordered_map<std::string, function_llvm> function_table;
 
 #define ADD_IDNODE(root, sym_table) {assert(root->children[0]->node_type == ID);struct _ast_node *id_node = root->children[0]; \
                                     if (check_scope(sym_table, id_node->node_val)) { \
