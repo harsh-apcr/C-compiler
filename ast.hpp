@@ -2,6 +2,8 @@
 #define _AST_H__
 
 #include "llvm/IR/Value.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Function.h"
 
 enum NODE_TYPE {
     ID, I_CONST, F_CONST, STRING, TYPE_QUAL_CONST, TYPE_QUAL_RESTRICT, TYPE_SPEC_UCHAR, TYPE_SPEC_SCHAR, 
@@ -32,13 +34,27 @@ struct _ast_node {
 
 struct _ast_node* ast_node_create(enum NODE_TYPE node_type, const char *node_val, struct _ast_node** children);
 
-
 void ast_destroy(struct _ast_node* root);
 void dump_ast(struct _ast_node* root);
 void add_children(struct _ast_node *root, struct _ast_node* child);
 void scope_checking(struct _ast_node *root);
 void codegen(struct _ast_node* root); 
+
+typedef struct __type_llvm {
+    llvm::Type *Ty;
+    bool is_signed;
+    __type_llvm(llvm::Type *Ty=nullptr, bool is_signed=true) : Ty(Ty), is_signed(is_signed) {}
+} type_llvm;
+
+typedef struct __value_llvm {
+    llvm::Value *val;
+    type_llvm ty;
+    __value_llvm(llvm::Value *val=nullptr, type_llvm ty=type_llvm()) : val(val), ty(ty) {}
+} value_llvm;
+
 void add_typespec(struct _ast_node *decl_spec, struct _ast_node *new_typespec);
 void add_typequal(struct _ast_node *typequal_list, struct _ast_node *typequal);
+std::string get_nodestr(enum NODE_TYPE nt);
+bool is_signed(struct _ast_node *typespec);
 
 #endif  // _AST_H__

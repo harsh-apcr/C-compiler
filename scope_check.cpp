@@ -1,12 +1,12 @@
 #include "scope_check.hpp"
 
 void enter_scope(symbol_table& sym_table) {
-    std::unordered_map<std::string, llvm::AllocaInst*> new_scope; 
+    std::unordered_map<std::string, value_llvm> new_scope; 
     sym_table.push_back(new_scope);
 }
 
-llvm::AllocaInst* find_symbol(const symbol_table& sym_table, const std::string& symbol) {
-    if (sym_table.empty()) return nullptr;
+value_llvm find_symbol(const symbol_table& sym_table, const std::string& symbol) {
+    if (sym_table.empty()) return value_llvm(nullptr, nullptr);
     auto rend = sym_table.rend();
     auto rbegin = sym_table.rbegin(); // initial top level symbol table
     for(auto scope_itr = rbegin;scope_itr != rend;scope_itr++) {
@@ -16,7 +16,7 @@ llvm::AllocaInst* find_symbol(const symbol_table& sym_table, const std::string& 
         }
     }
     // scope_itr == rend (one element past top level scope) => symbol doesn't exist in sym_table
-    return nullptr;
+    return value_llvm(nullptr, nullptr);
 }
 
 bool find_symbol_bool(const symbol_table& sym_table, const std::string& symbol) {
@@ -35,7 +35,7 @@ bool find_symbol_bool(const symbol_table& sym_table, const std::string& symbol) 
 }
 
 // push symbol to the top scope
-void add_symbol(symbol_table& sym_table, const std::string& symbol, llvm::AllocaInst* alloca) {
+void add_symbol(symbol_table& sym_table, const std::string& symbol, value_llvm alloca) {
     sym_table.back().insert({symbol, alloca});
 }
 

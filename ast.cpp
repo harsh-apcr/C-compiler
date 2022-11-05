@@ -110,7 +110,7 @@ void raise_type_error() {
     exit(1);
 }
 
-std::string get_nodeval(enum NODE_TYPE nt) {
+std::string get_nodestr(enum NODE_TYPE nt) {
     switch (nt) {
         case NODE_TYPE::TYPE_SPEC_SINT:
             return "signed int";
@@ -256,7 +256,7 @@ void add_typespec(struct _ast_node *old_typespec, struct _ast_node *new_typespec
     }
     new_typespec->node_type = new_type;
     free(new_typespec->node_val);   // free the old node_val
-    new_typespec->node_val = getc_str(get_nodeval(new_type));
+    new_typespec->node_val = getc_str(get_nodestr(new_type));
     ast_destroy(old_typespec->children[0]);
     assert(!old_typespec->children[1]);
     old_typespec->children[0] = new_typespec;
@@ -283,6 +283,20 @@ void add_typequal(struct _ast_node *typequal_list, struct _ast_node *typequal) {
     // result of adding multiple type qualifier is same as having a single type qualifier (no errors)
 }
 
+bool is_signed(struct _ast_node *typespec) {
+    assert(typespec->node_type == TYPE_SPECIFIER);
+    switch (typespec->children[0]->node_type)
+    {
+    case TYPE_SPEC_UCHAR:
+    case TYPE_SPEC_UINT:
+    case TYPE_SPEC_ULONG:
+    case TYPE_SPEC_ULONGLONG:
+    case TYPE_SPEC_USHORT:
+        return false;
+    default:
+        return true;
+    }
+}
 
 /* ============ ============ ============ ==========  ========== */
 /* ============ PART 2 : SYMBOL TABLE IMPLEMENTATION ============ */
