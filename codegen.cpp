@@ -66,6 +66,11 @@ inline void pop_break() {
     break_dest_list.pop_back();
 }
 
+void ENTER_LABEL_BLOCK(label_stack &label_stack) {
+    label_table new_table;
+    label_stack.push_back(new_table);
+}
+
 int PUSH_LABEL_TOP(const std::string &name,label_stack &label_stack, llvm::BasicBlock *bb) {
     if (find_label_top(label_stack, name)) return PUSH_LABEL_TOP_FAIL;
     else {
@@ -119,9 +124,9 @@ int intcast_type(value_llvm &value, type_llvm type) {
 value_llvm store_codegen(value_llvm to, value_llvm from) {
     if (intcast_type(from, to.ty) == 1) {
         if (!CurrFunction)
-            fprintf(stderr, "warning: type mismatch while assigning to `%s`\n", to.val->getName().str().c_str());
+            fprintf(stderr, "warning: potential type mismatch while assigning to `%s`\n      this warning will always appear if assigned types are not integers\n", to.val->getName().str().c_str());
         else
-            fprintf(stderr, "warning: type mismatch while assigning to `%s` in function `%s`\n", to.val->getName().str().c_str(), CurrFunction->getName().str().c_str());
+            fprintf(stderr, "warning: potential type mismatch while assigning to `%s` in function `%s`\n      this warning will always appear if assigned types are not integers\n", to.val->getName().str().c_str(), CurrFunction->getName().str().c_str());
     }
     Builder.CreateStore(from.val, to.val);
     return from;
@@ -148,6 +153,7 @@ llvm::Type *typespec_getllvmtype(struct _ast_node *typespec) {
         case TYPE_SPEC_ULONG:
             return llvm::Type::getInt32Ty(TheContext);
         case TYPE_SPEC_LONGLONG:
+        case TYPE_SPEC_INTLONGLONG:
         case TYPE_SPEC_INTLONG:
         case TYPE_SPEC_ULONGLONG:
             return llvm::Type::getInt64Ty(TheContext);
@@ -158,7 +164,7 @@ llvm::Type *typespec_getllvmtype(struct _ast_node *typespec) {
         case TYPE_SPEC_LONGDOUBLE:
             return llvm::Type::getFP128Ty(TheContext);
         default:
-            fprintf(stderr, "invalid type specifier %s provided", get_nodestr(type).c_str());
+            fprintf(stderr, "invalid type specifier `%s` provided\n", get_nodestr(type).c_str());
             exit(1);
     }
 }
@@ -248,6 +254,8 @@ std::vector<std::string> getfun_argv(struct _ast_node *fun_decl) {
     struct _ast_node *param_list = fun_decl->children[1];   // param_list->node_type == PARAM_LIST
     // all the child nodes of param_list are PARAM_DECL
     std::vector<std::string> argv;
+    if (!param_list)
+        return argv;
     struct _ast_node **param_decl;
     struct _ast_node *declarator;
     struct _ast_node *id_decl;
@@ -376,7 +384,11 @@ value_llvm constant_codegen(struct _ast_node *constant) {
 
 value_llvm string_codegen(struct _ast_node *string_node) {
     assert(string_node->node_type == NODE_TYPE::STRING);
-    llvm::GlobalVariable *str = Builder.CreateGlobalString(string_node->node_val);
+    if (!CurrFunction) {
+        fprintf(stderr, "error: string cannot be assigned to global variables\n");
+        exit(1);
+    }
+    llvm::GlobalVariable *str = Builder.CreateGlobalString(string_node->node_val, "str_const");
     std::vector<llvm::Value *> indices{ZERO_VAL, ZERO_VAL};
     llvm::Value *ptr = Builder.CreateInBoundsGEP(str, indices);
     return value_llvm(ptr, type_llvm(ptr->getType(), true)); // assumed to be `signed char*`
@@ -392,7 +404,7 @@ value_llvm id_codegen(struct _ast_node *id) {
     return v;
 }
 
-value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op) {
+value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op, bool i1toi32 = true) {
     
     if (!lhs.val->getType()->isIntegerTy() || !rhs.val->getType()->isIntegerTy()) {
         // lhs or rhs is a float/double type
@@ -413,27 +425,27 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op) {
             case LESS_THAN:
                 // O version of compare returns true only if both lhs and rhs are not NaN and comp holds
                 cmp_ret = value_llvm(Builder.CreateFCmpOLT(lhs.val, rhs.val, "flttemp"),
-                            type_llvm(llvm::Type::getInt32Ty(TheContext), true));
+                            type_llvm(llvm::Type::getInt1Ty(TheContext), true));
                 break;
             case GREATER_THAN:
                 cmp_ret = value_llvm(Builder.CreateFCmpOGT(lhs.val, rhs.val, "fgttemp"),
-                            type_llvm(llvm::Type::getInt32Ty(TheContext), true));
+                            type_llvm(llvm::Type::getInt1Ty(TheContext), true));
                 break;
             case LESSEQ:
                 cmp_ret = value_llvm(Builder.CreateFCmpOLE(lhs.val, rhs.val, "fletemp"),
-                            type_llvm(llvm::Type::getInt32Ty(TheContext), true));
+                            type_llvm(llvm::Type::getInt1Ty(TheContext), true));
                 break;
             case GREATEREQ:
                 cmp_ret = value_llvm(Builder.CreateFCmpOGE(lhs.val, rhs.val, "fgetemp"),
-                            type_llvm(llvm::Type::getInt32Ty(TheContext), true));
+                            type_llvm(llvm::Type::getInt1Ty(TheContext), true));
                 break;
             case EQOP:
                 cmp_ret = value_llvm(Builder.CreateFCmpOEQ(lhs.val, rhs.val, "feqtemp"),
-                            type_llvm(llvm::Type::getInt32Ty(TheContext), true));
+                            type_llvm(llvm::Type::getInt1Ty(TheContext), true));
                 break;
             case NEQOP:
                 cmp_ret = value_llvm(Builder.CreateFCmpONE(lhs.val, rhs.val, "fnetemp"),
-                            type_llvm(llvm::Type::getInt32Ty(TheContext), true));
+                            type_llvm(llvm::Type::getInt1Ty(TheContext), true));
                 break;
             default:
                 // binary operators that are not supported
@@ -444,8 +456,9 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op) {
             fprintf(stderr, "error: couldn't do comparision on floats\n");
             exit(1);
         }
-        return value_llvm(Builder.CreateZExtOrBitCast(cmp_ret.val, Builder.getInt32Ty()), 
-                type_llvm(llvm::Type::getInt32Ty(TheContext), true));
+        return i1toi32 ? value_llvm(Builder.CreateZExtOrBitCast(cmp_ret.val, Builder.getInt32Ty()), 
+                                    type_llvm(llvm::Type::getInt32Ty(TheContext), true)) :
+                        cmp_ret;
     } else {
         // both lhs and rhs are int type
         // before doing any operation on them, need to convert them into same type for any llvm-opcode
@@ -455,6 +468,7 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op) {
         bool is_signed = retval.ty.is_signed;
         llvm::Instruction::BinaryOps bin_op;
         llvm::CmpInst::Predicate cmp_op;
+        llvm::Value *cmp_ret;
         switch(op) {
             case MULT:
                 retval.val = Builder.CreateMul(lhs.val, rhs.val, "imultmp");
@@ -470,31 +484,61 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op) {
                 return retval;
             case LESS_THAN:
                 cmp_op = is_signed ? llvm::CmpInst::Predicate::ICMP_SLT : llvm::CmpInst::Predicate::ICMP_ULT;
-                retval.val = Builder.CreateZExtOrBitCast(Builder.CreateICmp(cmp_op, lhs.val, rhs.val, "ilttemp"),
-                                                            retval.ty.Ty);
+                cmp_ret = Builder.CreateICmp(cmp_op, lhs.val, rhs.val, "ilttemp");
+                if (i1toi32) {
+                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty);
+                } else {
+                    retval.ty.Ty = llvm::Type::getInt1Ty(TheContext);
+                    retval.val = cmp_ret;
+                }
                 return retval;
             case GREATER_THAN:
                 cmp_op = is_signed ? llvm::CmpInst::Predicate::ICMP_SGT : llvm::CmpInst::Predicate::ICMP_UGT;
-                retval.val = Builder.CreateZExtOrBitCast(Builder.CreateICmp(cmp_op, lhs.val, rhs.val, "igttemp"),
-                                                            retval.ty.Ty);
+                cmp_ret = Builder.CreateICmp(cmp_op, lhs.val, rhs.val, "igttemp");
+                if (i1toi32) {
+                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty);
+                } else {
+                    retval.ty.Ty = llvm::Type::getInt1Ty(TheContext);
+                    retval.val = cmp_ret;
+                }
                 return retval;
             case LESSEQ:
                 cmp_op = is_signed ? llvm::CmpInst::Predicate::ICMP_SLE : llvm::CmpInst::Predicate::ICMP_ULE;
-                retval.val = Builder.CreateZExtOrBitCast(Builder.CreateICmp(cmp_op, lhs.val, rhs.val, "iletemp"),
-                                                            retval.ty.Ty);
+                cmp_ret = Builder.CreateICmp(cmp_op, lhs.val, rhs.val, "iletemp");
+                if (i1toi32) {
+                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty);
+                } else {
+                    retval.ty.Ty = llvm::Type::getInt1Ty(TheContext);
+                    retval.val = cmp_ret;
+                }
                 return retval;
             case GREATEREQ:
                 cmp_op = is_signed ? llvm::CmpInst::Predicate::ICMP_SGE : llvm::CmpInst::Predicate::ICMP_SGE;
-                retval.val = Builder.CreateZExtOrBitCast(Builder.CreateICmp(cmp_op, lhs.val, rhs.val, "igetemp"),
-                                                            retval.ty.Ty);
+                cmp_ret = Builder.CreateICmp(cmp_op, lhs.val, rhs.val, "igetemp");
+                if (i1toi32) {
+                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty);
+                } else {
+                    retval.ty.Ty = llvm::Type::getInt1Ty(TheContext);
+                    retval.val = cmp_ret;
+                }
                 return retval;
             case EQOP:
-                retval.val = Builder.CreateZExtOrBitCast(Builder.CreateICmpEQ(lhs.val, rhs.val, "ieqtemp"),
-                                                            retval.ty.Ty);
+                cmp_ret = Builder.CreateICmpEQ(lhs.val, rhs.val, "ieqtemp");
+                if (i1toi32) {
+                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty);
+                } else {
+                    retval.ty.Ty = llvm::Type::getInt1Ty(TheContext);
+                    retval.val = cmp_ret;
+                }
                 return retval;
             case NEQOP:
-                retval.val = Builder.CreateZExtOrBitCast(Builder.CreateICmpNE(lhs.val, rhs.val, "inetemp"),
-                                                            retval.ty.Ty);
+                cmp_ret = Builder.CreateICmpNE(lhs.val, rhs.val, "inetemp");
+                if (i1toi32) {
+                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty);
+                } else {
+                    retval.ty.Ty = llvm::Type::getInt1Ty(TheContext);
+                    retval.val = cmp_ret;
+                }
                 return retval;
             case MOD:
                 bin_op = is_signed ? llvm::Instruction::BinaryOps::SRem : llvm::Instruction::BinaryOps::URem;
@@ -586,17 +630,18 @@ value_llvm declarator_codegen(struct _ast_node *declarator, type_llvm idtype) {
 value_llvm preincdecop_codegen(struct _ast_node *unary_expr, enum NODE_TYPE op) {
     value_llvm expr_val = unaryexpr_codegen(unary_expr);
     switch (op) {
-        case POSTINC_OP: {
+        case PREINC_OP: {
             value_llvm new_val = binop_codegen(expr_val,one_val,NODE_TYPE::PLUS);
             store_codegen(expr_val, new_val);
             return new_val;
         }
-        case POSTDEC_OP: {
+        case PREDEC_OP: {
             value_llvm new_val = binop_codegen(expr_val, one_val, NODE_TYPE::MINUS);
             store_codegen(expr_val, new_val);
             return new_val;
         }
         default:
+        // unreachable statements
             fprintf(stderr, "error: unexpected node-type\n");
             exit(1);
     }
@@ -610,7 +655,7 @@ value_llvm unaryop_codegen(struct _ast_node *unaryexpr, enum NODE_TYPE op) {
     switch (op) {
         case ADDR_OP:
         case DEREF_OP:
-            fprintf(stderr, "reference and de-reference operators are not supported\n");
+            fprintf(stderr, "error: reference and de-reference operators are not supported\n");
             exit(1);
         case UNPLUS:
             return unexpr_val;
@@ -633,7 +678,6 @@ value_llvm unaryop_codegen(struct _ast_node *unaryexpr, enum NODE_TYPE op) {
 // inc/dec the passed in postfix_expr
 value_llvm postincdecop_codegen(struct _ast_node *postfix_expr, enum NODE_TYPE op) {
     value_llvm expr_val = postfixexpr_codegen(postfix_expr);
-    value_llvm one_val = value_llvm(ONE_VAL, type_llvm(llvm::Type::getInt32Ty(TheContext), true));
     switch (op) {
         case POSTINC_OP: {
             value_llvm new_val = binop_codegen(expr_val,one_val,NODE_TYPE::PLUS);
@@ -828,7 +872,7 @@ value_llvm assignexpr_codegen(struct _ast_node *assign_expr) {
 value_llvm initializer_codegen(struct _ast_node *initializer) {
     assert(initializer->node_type == INIT_ASSIGN_EXPR || initializer->node_type == INIT_LIST);
     if (initializer->node_type == INIT_LIST) {
-        fprintf(stderr, "error: initializer lists are not handled");
+        fprintf(stderr, "error: initializer lists are not handled\n");
         exit(1);
     } else {
         // intializer->node_type == INIT_ASSIGN_EXPR
@@ -840,7 +884,7 @@ value_llvm initializer_codegen(struct _ast_node *initializer) {
 std::vector<value_llvm> initdecl_list_codegen(struct _ast_node *init_decl_list, struct _ast_node *decl_spec) {
     std::vector<value_llvm> vals;
     if (!init_decl_list) {
-        fprintf(stderr, "warning: useless type name in empty declaration");
+        fprintf(stderr, "warning: useless type name in empty declaration\n");
     } else {
         struct _ast_node **init_decl;
         struct _ast_node *declarator;
@@ -854,11 +898,10 @@ std::vector<value_llvm> initdecl_list_codegen(struct _ast_node *init_decl_list, 
             ptr = declarator->children[1];
             type_llvm idtype = get_type(decl_spec, ptr);
             value_llvm declarator_value = declarator_codegen(declarator, idtype);
-            // direct_declarator->node_type == FUNCTION_PTRDECL || IDENTIFIER_DECL
             if (initializer) {
                 value_llvm initializer_value = initializer_codegen(initializer);
                 if (auto func = llvm::dyn_cast<llvm::Function>(declarator_value.val)) {
-                    fprintf(stderr, "error: cannot initalize function declarations\n");
+                    fprintf(stderr, "error: cannot initialize function declarations\n");
                     exit(1);
                 } else if (auto globalvar = llvm::dyn_cast<llvm::GlobalVariable>(declarator_value.val)) {
                     if (auto constval = llvm::dyn_cast<llvm::Constant>(initializer_value.val)) {
@@ -866,7 +909,7 @@ std::vector<value_llvm> initdecl_list_codegen(struct _ast_node *init_decl_list, 
                         vals.push_back(declarator_value);
                     }
                     else {
-                        fprintf(stderr, "error: initializer element is not constant");
+                        fprintf(stderr, "error: initializer is not constant for global variable `%s`\n", declarator_value.val->getName().str().c_str());
                         exit(1);
                     }
                 } else {
@@ -976,7 +1019,6 @@ function_llvm function_decl_codegen(struct _ast_node *fun_decl, type_llvm retty)
     llvm::FunctionType *FT = llvm::FunctionType::get(retty.Ty, paramtypes, false); 
     // false parameter indicates that it is not a vararg function, we might handel that later
     // TODO: add support for vararg (check for ellipsis node)
-
     llvm::Function* F = llvm::Function::Create(FT,
                                          llvm::Function::ExternalLinkage,
                                           fun_decl->children[0]->node_val, // root->children[0]->node_type == ID
@@ -1034,8 +1076,8 @@ void function_def_codegen(struct _ast_node *root) {
 
     // Record the function arguments in the named-values map (push a new scope)
     enter_scope(NamedValues);
-    enter_scope(LabelValues);   // pushing the first label_table
     assert(NotFoundLabels.empty());
+    assert(LabelTable.empty());
     unsigned int i = 0;
     for(auto &Arg : TheFunction->args()) {
         // create an alloca instr for this param
@@ -1056,7 +1098,7 @@ void function_def_codegen(struct _ast_node *root) {
 
     if (strncmp(insert_blk->getName().str().c_str(), "ret_end", 7 * sizeof(char))) {
         if (!rettype.Ty->isVoidTy()) {
-            fprintf(stderr, "warning : No return statement in a non-void function\n");
+            fprintf(stderr, "warning : No return statement at the end in a non-void function\n");
             Builder.CreateRet(llvm::UndefValue::get(TheFunction->getReturnType())); // returns unspecified bit pattern
         } else {
             Builder.CreateRetVoid();
@@ -1064,7 +1106,6 @@ void function_def_codegen(struct _ast_node *root) {
     }
     
     exit_scope(NamedValues);
-    exit_scope(LabelValues);    // now LabelValues is empty
     LabelTable.clear();
     NotFoundLabels.clear();
     CurrFunction = nullptr;
@@ -1156,9 +1197,9 @@ void casestmt_codegen(struct _ast_node *case_stmt) {
     }
 
     std::string casestmt_label = "case" + const_val->getValue().toString(10, true); // only signed integers are supported
-
+    // push_label(LabelValues) must be pushed by switch statement first
     llvm::BasicBlock *bb = llvm::BasicBlock::Create(TheContext, casestmt_label, CurrFunction);
-    int ret = PUSH_LABEL_TOP(casestmt_label, LabelValues, bb);  // need to pop this
+    int ret = PUSH_LABEL_TOP(casestmt_label, LabelValues, bb);  // need to pop this (in switch_codegen)
     if (ret == PUSH_LABEL_TOP_FAIL) {
         fprintf(stderr, "duplicate case value `%s`", const_val->getValue().toString(10, true).c_str());
         exit(1);
@@ -1172,7 +1213,6 @@ void casestmt_codegen(struct _ast_node *case_stmt) {
     
     Builder.SetInsertPoint(bb);
     stmt_codegen(stmt);
-    POP_LABEL_BLOCK(LabelValues);
 }
 
 // default_stmt
@@ -1180,7 +1220,7 @@ llvm::BasicBlock *defstmt_codegen(struct _ast_node *defstmt) {
     struct _ast_node *stmt = defstmt->children[0];
     
     llvm::BasicBlock *bb = llvm::BasicBlock::Create(TheContext, "default", CurrFunction);
-    int ret = PUSH_LABEL_TOP("default", LabelValues, bb);   // need to pop this
+    int ret = PUSH_LABEL_TOP("default", LabelValues, bb);   // need to pop this (in switch_codegen)
     if (ret == PUSH_LABEL_TOP_FAIL) {
         fprintf(stderr, "multiple default labels in one switch\n");
         exit(1);
@@ -1194,7 +1234,6 @@ llvm::BasicBlock *defstmt_codegen(struct _ast_node *defstmt) {
     
     Builder.SetInsertPoint(bb);
     stmt_codegen(stmt);
-    POP_LABEL_BLOCK(LabelValues);
     return bb;
 }
 
@@ -1205,7 +1244,6 @@ void cmpdstmt_codegen(struct _ast_node *root, bool is_fundef) {
     struct _ast_node *blk_item_list = root->children[0];
     if (!is_fundef) {
         enter_scope(NamedValues);
-        enter_scope(LabelValues);
     }
     if (blk_item_list) {
         struct _ast_node **blkitem;    // (*blk_item)->node_type == DECL or statement(lots of them)
@@ -1215,9 +1253,7 @@ void cmpdstmt_codegen(struct _ast_node *root, bool is_fundef) {
     }
     if (!is_fundef) {
         exit_scope(NamedValues);
-        exit_scope(LabelValues);
-    }
-    
+    }    
 }
 
 // expression_statement
@@ -1233,9 +1269,9 @@ void selectstmt_codegen(struct _ast_node *select_stmt) {
     switch(select_stmt->node_type) {
         case IF_ELSE_STMT:
         case IF_STMT:
-            ifelsestmt_codegen(select_stmt);
+            ifelsestmt_codegen(select_stmt);break;
         case SWITCH_STMT:
-            switchstmt_codegen(select_stmt);
+            switchstmt_codegen(select_stmt);break;
         default:
             fprintf(stderr, "not a select statement\n");exit(1);
     }
@@ -1268,7 +1304,7 @@ void ifelsestmt_codegen(struct _ast_node *ifelse_stmt) {
         return;
     }
 
-    cond_val = binop_codegen(cond_val, zero_val, NODE_TYPE::NEQOP);
+    cond_val = binop_codegen(cond_val, zero_val, NODE_TYPE::NEQOP, false);
 
     llvm::BasicBlock *then_bb = llvm::BasicBlock::Create(TheContext, "then", CurrFunction);
     llvm::BasicBlock *else_bb;
@@ -1358,7 +1394,7 @@ void whilestmt_codegen(struct _ast_node *while_stmt) {
         }
     }
 
-    cond_val = binop_codegen(cond_val, zero_val, NODE_TYPE::NEQOP);
+    cond_val = binop_codegen(cond_val, zero_val, NODE_TYPE::NEQOP, false);
     llvm::BasicBlock *body_bb = llvm::BasicBlock::Create(TheContext, "while_body", CurrFunction);
     llvm::BasicBlock *merge_bb = llvm::BasicBlock::Create(TheContext, "while_cont");
 
@@ -1402,7 +1438,7 @@ void dowhilestmt_codegen(struct _ast_node *dowhile_stmt) {
     Builder.SetInsertPoint(cond_bb);
 
     value_llvm cond_val = expression_codegen(cond);
-    cond_val = binop_codegen(cond_val, zero_val, NODE_TYPE::NEQOP);
+    cond_val = binop_codegen(cond_val, zero_val, NODE_TYPE::NEQOP, false);
     Builder.CreateCondBr(cond_val.val, body_bb, merge_bb);
 
     // emit code for merge block
@@ -1487,10 +1523,10 @@ void return_codegen(struct _ast_node *ret_stmt) {
     llvm::Type *retty = CurrFunction->getReturnType();
     
     if (retty->isVoidTy() && ret_expr) {
-        fprintf(stderr, "`return` with a value, in function returning void");
+        fprintf(stderr, "`return` with a value, in function returning void\n");
         exit(1);
     } else if (!retty->isVoidTy() && !ret_expr) {
-        fprintf(stderr, "`return` with no value, in function returning non-void");
+        fprintf(stderr, "`return` with no value, in function returning non-void\n");
         exit(1);
     }
 

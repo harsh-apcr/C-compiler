@@ -10,7 +10,7 @@ value_llvm string_codegen(struct _ast_node *string_node);
 
 value_llvm id_codegen(struct _ast_node *id);
 
-value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op);
+value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op, bool i1toi32);
 value_llvm binop_codegen(struct _ast_node *left, struct _ast_node *right, enum NODE_TYPE op);
 
 value_llvm preincdecop_codegen(struct _ast_node *unary_expr, enum NODE_TYPE op);

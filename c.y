@@ -518,8 +518,8 @@ expression_statement
 
 selection_statement
 	: IF '(' expression ')' statement ELSE statement		{ temp[0]=$3;temp[1]=$5;temp[2]=$7;temp[3]=NULL;$$=ast_node_create(IF_ELSE_STMT, "if-else", temp); }
-	| IF '(' expression ')' statement						{ temp[0]=$3;temp[1]=$5;temp[3]=NULL;$$=ast_node_create(IF_STMT, "if", temp); }
-	| SWITCH '(' expression ')' statement					{ temp[0]=$3;temp[1]=$5;temp[3]=NULL;$$=ast_node_create(SWITCH_STMT, "switch", temp); }
+	| IF '(' expression ')' statement						{ temp[0]=$3;temp[1]=$5;temp[2]=NULL;$$=ast_node_create(IF_STMT, "if", temp); }
+	| SWITCH '(' expression ')' statement					{ temp[0]=$3;temp[1]=$5;temp[2]=NULL;$$=ast_node_create(SWITCH_STMT, "switch", temp); }
 	;
 
 iteration_statement
