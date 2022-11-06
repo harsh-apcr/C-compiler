@@ -527,8 +527,8 @@ iteration_statement
 	| DO statement WHILE '(' expression ')' ';'										{ temp[0]=$2;temp[1]=$5;temp[2]=NULL;$$=ast_node_create(DO_WHILE_STMT, "do-while-loop", temp); }
 	| FOR '(' expression_statement expression_statement ')' statement				{ temp[0]=$3;temp[1]=$4;temp[2]=$6;temp[3]=NULL;$$ = ast_node_create(FOR_STMT1, "for-loop-1", temp); }
 	| FOR '(' expression_statement expression_statement expression ')' statement	{ temp[0]=$3;temp[1]=$4;temp[2]=$5;temp[3]=$7;temp[4]=NULL;$$ = ast_node_create(FOR_STMT2, "for-loop-2", temp); }
-	| FOR '(' declaration expression_statement ')' statement						{ temp[0]=$3;temp[1]=$4;temp[2]=$6;temp[3]=NULL;$$ = ast_node_create(FOR_STMT3, "for-loop-3", temp); }
-	| FOR '(' declaration expression_statement expression ')' statement				{ temp[0]=$3;temp[1]=$4;temp[2]=$5;temp[3]=$7;temp[4]=NULL;$$ = ast_node_create(FOR_STMT4, "for-loop-4", temp); }
+/*	| FOR '(' declaration expression_statement ')' statement						{ temp[0]=$3;temp[1]=$4;temp[2]=$6;temp[3]=NULL;$$ = ast_node_create(FOR_STMT3, "for-loop-3", temp); }
+	| FOR '(' declaration expression_statement expression ')' statement				{ temp[0]=$3;temp[1]=$4;temp[2]=$5;temp[3]=$7;temp[4]=NULL;$$ = ast_node_create(FOR_STMT4, "for-loop-4", temp); }	*/
 	;
 
 jump_statement
