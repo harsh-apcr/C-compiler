@@ -1,6 +1,7 @@
 .vscode
 examples/*
 .vscode
+out/
 *.gch
 *.out
 *.o

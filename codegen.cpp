@@ -20,6 +20,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/IR/GlobalVariable.h"
 
 #include "expression_codegen.hpp"
 #include "statement_codegen.hpp"
@@ -93,16 +94,15 @@ static llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
 }
 
 
-static inline llvm::AllocaInst *CreateVariableAlloca(llvm::Type *Ty, const std::string &VarName) {
-    return Builder.CreateAlloca(Ty, 0, VarName);
+llvm::AllocaInst *CreateVariableAlloca(type_llvm ty, const std::string &VarName) {
+    return Builder.CreateAlloca(ty.Ty, 0, VarName);
 }
 
-void cast_type(value_llvm &value, type_llvm type) {
+int intcast_type(value_llvm &value, type_llvm type) {
     auto ty1 = llvm::dyn_cast<llvm::IntegerType>(value.val->getType());
     auto ty2 = llvm::dyn_cast<llvm::IntegerType>(type.Ty);    
     if (!ty1 || !ty2) {
-        fprintf(stderr, "warning: type mismatch for assignment of `%s`", value.val->getName().str().c_str());
-        return;
+        return 1;
     }
     bool is_signed = value.ty.is_signed;
     if (is_signed)
@@ -112,16 +112,20 @@ void cast_type(value_llvm &value, type_llvm type) {
     // type of val has been changed accordingly
     value.ty.is_signed = type.is_signed;
     value.ty.Ty = value.val->getType(); // update ty as well
+    return 0;
 }
 
+// to = from -> to = (to) from  // typecast `from` value to `to` value
 value_llvm store_codegen(value_llvm to, value_llvm from) {
-    value_llvm toval = find_symbol(NamedValues, to.val->getName());
-    cast_type(to, toval.val->getType());
+    if (intcast_type(from, to.ty) == 1) {
+        if (!CurrFunction)
+            fprintf(stderr, "warning: type mismatch while assigning to `%s`\n", to.val->getName().str().c_str());
+        else
+            fprintf(stderr, "warning: type mismatch while assigning to `%s` in function `%s`\n", to.val->getName().str().c_str(), CurrFunction->getName().str().c_str());
+    }
     Builder.CreateStore(from.val, to.val);
     return from;
 }
-
-
 
 
 // ============ GETTING THE TYPE INFORMATION FROM DECLARATION_SPECIFIER ============
@@ -247,13 +251,16 @@ std::vector<std::string> getfun_argv(struct _ast_node *fun_decl) {
     struct _ast_node **param_decl;
     struct _ast_node *declarator;
     struct _ast_node *id_decl;
+    int no_name = 0;
     for(param_decl = param_list->children;*param_decl != NULL;++param_decl) {
         declarator = (*param_decl)->children[1];
-        assert(declarator);
-        // assuming that we have no function pointer being passed in our language for now we may try to extend this later
-        id_decl = declarator->children[0];
-        assert(id_decl->node_type == IDENTIFIER_DECL);
-        argv.push_back(id_decl->children[0]->node_val);
+        if (declarator) {
+            id_decl = declarator->children[0];
+            assert(id_decl->node_type == IDENTIFIER_DECL);
+            argv.push_back(id_decl->children[0]->node_val);
+        } else {
+            argv.push_back("no_name" + std::to_string(no_name++));
+        }
     }
     return argv;
 }
@@ -381,6 +388,7 @@ value_llvm id_codegen(struct _ast_node *id) {
     value_llvm v = find_symbol(NamedValues, id->node_val);
     if (!v.val) LogErrorV(id->node_val);    // this check is anyway performed by scope checker
     v.val = Builder.CreateLoad(v.val, id->node_val);
+    assert(v.ty.Ty);
     return v;
 }
 
@@ -541,14 +549,25 @@ value_llvm binop_codegen(struct _ast_node *left, struct _ast_node *right, enum N
 // identifier declaration node along with its type
 value_llvm iddecl_codegen(struct _ast_node *iddecl, type_llvm ty) {
     assert(iddecl->node_type == IDENTIFIER_DECL);
+    assert(ty.Ty);
     if (ty.Ty->isVoidTy()) {
         fprintf(stderr, "void type for variable declaration is not allowed\n");
         exit(1);
+    }    
+    if (!CurrFunction) {
+        TheModule->getOrInsertGlobal(iddecl->children[0]->node_val, ty.Ty);
+        llvm::GlobalVariable *gv = TheModule->getNamedGlobal(iddecl->children[0]->node_val);
+        gv->setLinkage(llvm::GlobalVariable::ExternalLinkage);
+        value_llvm gv_val = value_llvm(gv, ty);
+        ADD_IDNODE_VAL(iddecl, gv_val, NamedValues);
+        return gv_val;
+    } else {
+        llvm::AllocaInst *Alloca = CreateVariableAlloca(ty, iddecl->children[0]->node_val);
+        value_llvm iddecl_val = value_llvm(Alloca, ty);
+        ADD_IDNODE_VAL(iddecl, iddecl_val, NamedValues);  // NOTE: value added to symbol table varname is nullptr by def
+        return iddecl_val;
     }
-    llvm::AllocaInst *Alloca = CreateVariableAlloca(ty.Ty, iddecl->children[0]->node_val);
-    value_llvm iddecl_val = value_llvm(Alloca, ty);
-    ADD_IDNODE_VAL(iddecl, iddecl_val, NamedValues);  // NOTE: value added to symbol table varname is nullptr by def
-    return iddecl_val;
+    
 }
 
 // declarator : pointer direct_declarator | direct_declarator;
@@ -785,8 +804,11 @@ value_llvm assignop_codegen(struct _ast_node *assign_expr) {
             op = BITXOR;break;
         case BITORASSIGN:
             op = BITOR;break;
+        case ASSIGN:
+            op=ASSIGN;break;
         default:
-            fprintf(stderr, "not an assign operator\n");exit(1);
+            fprintf(stderr, "not an assign operator\n");
+            exit(1);
     }
     if (op!=ASSIGN)
         right = binop_codegen(left, right, op);
@@ -908,7 +930,8 @@ value_llvm function_call_codegen(struct _ast_node *func_call) {
     for (unsigned int i = 0; i != num_args; ++i) {
         ArgsV[i] = assignexpr_codegen(arg_list->children[i]);       // arg_list->children[i] is a node for assignment_expression
         assert(ArgsV[i].val && "error while generating code for arguments of function call");
-        cast_type(ArgsV[i], func_val.param_tylist[i]);
+        if (func_val.param_tylist[i].Ty->isIntegerTy())
+            intcast_type(ArgsV[i], func_val.param_tylist[i]);
     }
 
     std::vector<llvm::Value *> llvmArgsV(num_args);
@@ -917,7 +940,7 @@ value_llvm function_call_codegen(struct _ast_node *func_call) {
     }
     llvm::Value *rawret = Builder.CreateCall(func_llvmval, llvmArgsV, "calltmp");   
     value_llvm retval = value_llvm(rawret, rawret->getType());                      
-    cast_type(retval, func_val.ty);
+    intcast_type(retval, func_val.ty);
     return retval;
 } 
 
@@ -1013,33 +1036,33 @@ void function_def_codegen(struct _ast_node *root) {
     enter_scope(NamedValues);
     enter_scope(LabelValues);   // pushing the first label_table
     assert(NotFoundLabels.empty());
+    unsigned int i = 0;
     for(auto &Arg : TheFunction->args()) {
         // create an alloca instr for this param
-        llvm::AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Arg.getType(), Arg.getName());
+        value_llvm Alloca(CreateEntryBlockAlloca(TheFunction, function.param_tylist[i].Ty, Arg.getName()),
+                            function.param_tylist[i]); 
 
         // store the initial value into the alloca
-        Builder.CreateStore(&Arg, Alloca);
+        Builder.CreateStore(&Arg, Alloca.val);
 
         // add argument to the symbol table
         add_symbol(NamedValues, Arg.getName(), Alloca);
+        i++;
     }
     struct _ast_node *cmpd_stmt = root->children[2]; // cmp_stmt->node_type == CMPND_STMT
     CurrFunction = TheFunction;
     cmpdstmt_codegen(cmpd_stmt, true);
     llvm::BasicBlock *insert_blk = Builder.GetInsertBlock();
-    // insert block is not terminated with br
-    assert(!insert_blk->getTerminator());
 
-    if (insert_blk->empty() && insert_blk->use_empty()) {
-        // empty basic block with no use (deadcode elimination)
-        TheFunction->eraseFromParent();
-    } else if (!rettype.Ty->isVoidTy()) {
-        fprintf(stderr, "warning : No return statement in a non-void function\n");
-        Builder.CreateRet(llvm::UndefValue::get(TheFunction->getReturnType())); // returns unspecified bit pattern
-    } else {
-        Builder.CreateRetVoid();
+    if (strncmp(insert_blk->getName().str().c_str(), "ret_end", 7 * sizeof(char))) {
+        if (!rettype.Ty->isVoidTy()) {
+            fprintf(stderr, "warning : No return statement in a non-void function\n");
+            Builder.CreateRet(llvm::UndefValue::get(TheFunction->getReturnType())); // returns unspecified bit pattern
+        } else {
+            Builder.CreateRetVoid();
+        }
     }
-
+    
     exit_scope(NamedValues);
     exit_scope(LabelValues);    // now LabelValues is empty
     LabelTable.clear();
@@ -1454,6 +1477,7 @@ void break_codegen(struct _ast_node *break_stmt) {
 
 void return_codegen(struct _ast_node *ret_stmt) {
     // RETURN_STMT1 or RETURN_STMT2
+    
     struct _ast_node *ret_expr = ret_stmt->children[0];
     if (!CurrFunction) {
         fprintf(stderr, "return statement outside of a function\n");
@@ -1461,6 +1485,7 @@ void return_codegen(struct _ast_node *ret_stmt) {
     }
 
     llvm::Type *retty = CurrFunction->getReturnType();
+    
     if (retty->isVoidTy() && ret_expr) {
         fprintf(stderr, "`return` with a value, in function returning void");
         exit(1);
@@ -1472,7 +1497,7 @@ void return_codegen(struct _ast_node *ret_stmt) {
     if (ret_expr) {
         // RETURN_STMT2
         value_llvm retval = expression_codegen(ret_expr);
-        cast_type(retval, retty);
+        intcast_type(retval, retty);
         Builder.CreateRet(retval.val);
     } else {
         // RETURN_STMT1
@@ -1502,17 +1527,24 @@ void externaldecl_codegen(struct _ast_node *extern_decl) {
 void translationunit_codegen(struct _ast_node *trans_unit) {
     assert(trans_unit->node_type== NODE_TYPE::TRANSLATION_UNIT);
     struct _ast_node **external_declaration;
-    for(external_declaration = trans_unit->children;*external_declaration!=NULL;external_declaration++) {
+    enter_scope(NamedValues);
+    for(external_declaration = trans_unit->children;*external_declaration;external_declaration++) {
         externaldecl_codegen(*external_declaration);
     }
+    exit_scope(NamedValues);
 }
 
 void codegen(struct _ast_node *root) {
     translationunit_codegen(root);
 }
 
+static void InitializeModule() {
+    // Open a module.
+    TheModule = std::make_unique<llvm::Module>("llvm ir", TheContext);
+}
 
 void print_module(struct _ast_node *root, std::string &out_filename) {
+    InitializeModule();
     codegen(root);
     std::error_code err;
     llvm::raw_fd_ostream file(out_filename, err);

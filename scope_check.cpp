@@ -186,7 +186,7 @@ void scope_checker(symbol_table &sym_table,label_table &label_table,
                         ADD_IDNODE(root, sym_table)
                     // otherwise it is already present in the symbol table
                     struct _ast_node* param_type_list = root->children[1];
-                    printf("entered scope -function_decl\n");
+                    // printf("entered scope -function_decl\n");
                     enter_scope(sym_table);
                     if (param_type_list != NULL)
                         scope_checker(sym_table, label_table, notfound_labels, param_type_list, true);   // handel this case
@@ -224,12 +224,12 @@ void scope_checker(symbol_table &sym_table,label_table &label_table,
             }
             // new scope starts here
             case CMPND_STMT: {
-                if (!is_fun_def) { printf("entered scope -cmpd_stmt\n");enter_scope(sym_table);}
+                if (!is_fun_def) { /*printf("entered scope -cmpd_stmt\n");*/enter_scope(sym_table);}
                 if (root->children[0] != NULL) {
                     scope_checker(sym_table, label_table, notfound_labels, root->children[0], false);
                     // root->children[0] is a node of type block_item_list
                 }
-                printf("exiting scope -cmpd_stmt\n");
+                // printf("exiting scope -cmpd_stmt\n");
                 exit_scope(sym_table);
                 break;
             }
@@ -242,14 +242,14 @@ void scope_checker(symbol_table &sym_table,label_table &label_table,
                 assert(label_table.empty());
                 assert(notfound_labels.empty());
                 assert(sym_table.empty());
-                printf("entered scope -translation_unit\n");
+                // printf("entered scope -translation_unit\n");
                 enter_scope(sym_table); // enter a new scope (external scope)
                 for(struct _ast_node** child = root->children;*child!=NULL;child++) {
                     scope_checker(sym_table, label_table, notfound_labels, *child, false);
                 }
                 assert(label_table.empty());
                 assert(notfound_labels.empty());
-                printf("exiting scope - translation_unit\n");
+                // printf("exiting scope - translation_unit\n");
                 exit_scope(sym_table);
                 break;
             }

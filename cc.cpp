@@ -33,18 +33,18 @@ main(int argc, char **argv)
   if (ret == 0) {
     struct _ast_node *root_node = get_ast_root();
     scope_checking(root_node);
-    // printf("Do you want to see the AST representation (y/n)? ");
-    // char c;
-    // scanf("%c", &c);
-    // if (c == 'y' || c == 'Y' || c == '\n') {
-    //   printf("-------- ABSTRACT SYNTAX TREE -------\n");
-    //   dump_ast(root_node);
-    //   ast_destroy(root_node);   // free the memory
-    // }
+    printf("Do you want to see the AST representation (y/n)? ");
+    char c;
+    scanf("%c", &c);
+    if (c == 'y' || c == 'Y' || c == '\n') {
+      printf("-------- ABSTRACT SYNTAX TREE -------\n");
+      dump_ast(root_node);
+    }
 
     // code generation
     std::string out_filename = "out/a.ll";
     print_module(root_node, out_filename);
+    ast_destroy(root_node);   // free the memory
     exit(0);
     }
 
