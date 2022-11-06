@@ -52,6 +52,8 @@ static std::unordered_multimap<std::string, llvm::BranchInst *> NotFoundLabels;
 static std::vector<llvm::BasicBlock *> continue_dest_list;
 static std::vector<llvm::BasicBlock *> break_dest_list;
 
+std::vector<llvm::SwitchInst *> switch_inst;
+
 inline void push_continue(llvm::BasicBlock *bb) {
     continue_dest_list.push_back(bb);
 }
@@ -82,6 +84,17 @@ int PUSH_LABEL_TOP(const std::string &name,label_stack &label_stack, llvm::Basic
 void POP_LABEL_BLOCK(label_stack &label_stack) {
     assert(!label_stack.empty());
     label_stack.pop_back();
+}
+
+llvm::BasicBlock *GET_DEF_FROM_TOP(label_stack &label_stack) {
+    label_table top_table = label_stack.back();
+    // "default" is prefix of the name we wish to find
+    for(auto itr = top_table.begin();itr != top_table.end();itr++) {
+        if (!strncmp(itr->first.c_str(), "default", 7 * sizeof(char))) {
+            return itr->second;
+        }
+    }
+    return nullptr;
 }
 
 
@@ -229,9 +242,12 @@ void make_common_type(value_llvm &val1, value_llvm &val2) {
     }
 }
 
-inline void convert_bool(llvm::Value *&val) {
-    val = Builder.CreateICmpEQ(val, ZERO_VAL);
-    val = Builder.CreateZExtOrBitCast(val, llvm::IntegerType::get(TheContext, sizeof(int)));
+inline void convert_bool(value_llvm &val) {
+    zero_val = ZERO_VAL;
+    make_common_type(val, zero_val);
+    val.val = Builder.CreateICmpEQ(val.val, zero_val.val);
+    val.val = Builder.CreateZExtOrBitCast(val.val, llvm::IntegerType::get(TheContext, sizeof(int)));
+    val.ty = type_llvm(llvm::IntegerType::get(TheContext, sizeof(int)));
 }
 
 // ============ GETTING THE TYPE INFORMATION FROM DECLARATION_SPECIFIER and PTR node ============
@@ -480,7 +496,7 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op, bo
                 retval.val = Builder.CreateAdd(lhs.val, rhs.val, "iaddtmp");
                 return retval;
             case MINUS:
-                retval.val = Builder.CreateMul(lhs.val, rhs.val, "isubtmp");
+                retval.val = Builder.CreateSub(lhs.val, rhs.val, "isubtmp");
                 return retval;
             case LESS_THAN:
                 cmp_op = is_signed ? llvm::CmpInst::Predicate::ICMP_SLT : llvm::CmpInst::Predicate::ICMP_ULT;
@@ -513,7 +529,7 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op, bo
                 }
                 return retval;
             case GREATEREQ:
-                cmp_op = is_signed ? llvm::CmpInst::Predicate::ICMP_SGE : llvm::CmpInst::Predicate::ICMP_SGE;
+                cmp_op = is_signed ? llvm::CmpInst::Predicate::ICMP_SGE : llvm::CmpInst::Predicate::ICMP_UGE;
                 cmp_ret = Builder.CreateICmp(cmp_op, lhs.val, rhs.val, "igetemp");
                 if (i1toi32) {
                     retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty);
@@ -562,13 +578,13 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op, bo
 
             // logical operators here, convert lhs/rhs value to 0 or 1 via comparison and then do bitand/bitor
             case LAND:
-                convert_bool(lhs.val);
-                convert_bool(rhs.val);
+                convert_bool(lhs);
+                convert_bool(rhs);
                 retval.val = Builder.CreateAnd(lhs.val, rhs.val, "landtemp");
                 return retval;
             case LOR:
-                convert_bool(lhs.val);
-                convert_bool(rhs.val);
+                convert_bool(lhs);
+                convert_bool(rhs);
                 retval.val = Builder.CreateOr(lhs.val, rhs.val, "lortemp");   
                 return retval;
             default:
@@ -628,6 +644,7 @@ value_llvm declarator_codegen(struct _ast_node *declarator, type_llvm idtype) {
 }
 
 value_llvm preincdecop_codegen(struct _ast_node *unary_expr, enum NODE_TYPE op) {
+    one_val = ONE_VAL;
     value_llvm expr_val = unaryexpr_codegen(unary_expr);
     switch (op) {
         case PREINC_OP: {
@@ -650,6 +667,7 @@ value_llvm preincdecop_codegen(struct _ast_node *unary_expr, enum NODE_TYPE op) 
 value_llvm unaryop_codegen(struct _ast_node *unaryexpr, enum NODE_TYPE op) {
     value_llvm negone_val = value_llvm(llvm::ConstantInt::get(TheContext, llvm::APInt(sizeof(int), -1)),
                                      type_llvm(llvm::Type::getInt32Ty(TheContext), true));
+    zero_val = ZERO_VAL;
     
     value_llvm unexpr_val = unaryexpr_codegen(unaryexpr);
     switch (op) {
@@ -677,6 +695,7 @@ value_llvm unaryop_codegen(struct _ast_node *unaryexpr, enum NODE_TYPE op) {
 
 // inc/dec the passed in postfix_expr
 value_llvm postincdecop_codegen(struct _ast_node *postfix_expr, enum NODE_TYPE op) {
+    one_val = ONE_VAL;
     value_llvm expr_val = postfixexpr_codegen(postfix_expr);
     switch (op) {
         case POSTINC_OP: {
@@ -758,6 +777,7 @@ value_llvm expression_codegen(struct _ast_node *expression) {
 
 // TODO : complete the implementation
 value_llvm ternop_codegen(struct _ast_node *expr) {
+    zero_val = ZERO_VAL;
     assert(expr->node_type == TERNOP);
     struct _ast_node *cond = expr->children[0];         // valexpr_codegen()
     struct _ast_node *true_expr = expr->children[1];    // expression_codegen()
@@ -1187,6 +1207,10 @@ void labeledstmt_codegen(struct _ast_node *label_stmt) {
 void casestmt_codegen(struct _ast_node *case_stmt) {
     struct _ast_node *const_expr = case_stmt->children[0];
     struct _ast_node *stmt = case_stmt->children[1];
+    if (switch_inst.empty()) {
+        fprintf(stderr, "error: case statement is not enclosed within switch\n");
+        exit(1);
+    }
 
     value_llvm expr_val = constexpr_codegen(const_expr);
     auto const_val = llvm::dyn_cast<llvm::ConstantInt>(expr_val.val);
@@ -1205,14 +1229,17 @@ void casestmt_codegen(struct _ast_node *case_stmt) {
         exit(1);
     }
     // ret == PUSH_LABEL_TOP_SUCCESS
+
     llvm::BasicBlock *insert_blk = Builder.GetInsertBlock();
     if (insert_blk->empty()) {
         insert_blk->replaceAllUsesWith(bb);
         Builder.GetInsertBlock()->eraseFromParent();
     } else Builder.CreateBr(bb);
-    
+
     Builder.SetInsertPoint(bb);
     stmt_codegen(stmt);
+
+    switch_inst.back()->addCase(const_val, bb);
 }
 
 // default_stmt
@@ -1226,6 +1253,7 @@ llvm::BasicBlock *defstmt_codegen(struct _ast_node *defstmt) {
         exit(1);
     }
     // ret == PUSH_LABEL_TOP_SUCCESS
+
     llvm::BasicBlock *insert_blk = Builder.GetInsertBlock();
     if (insert_blk->empty()) {
         insert_blk->replaceAllUsesWith(bb);
@@ -1303,7 +1331,7 @@ void ifelsestmt_codegen(struct _ast_node *ifelse_stmt) {
         }
         return;
     }
-
+    zero_val = ZERO_VAL;
     cond_val = binop_codegen(cond_val, zero_val, NODE_TYPE::NEQOP, false);
 
     llvm::BasicBlock *then_bb = llvm::BasicBlock::Create(TheContext, "then", CurrFunction);
@@ -1345,13 +1373,28 @@ void switchstmt_codegen(struct _ast_node *switchstmt) {
     struct _ast_node *switch_stmt = switchstmt->children[1];   // statement
 
     value_llvm switchexpr_val = expression_codegen(switch_expr);
-    auto switch_end = llvm::BasicBlock::Create(TheContext, "switch_end");
-    Builder.CreateSwitch(switchexpr_val.val, switch_end);
+    auto switch_begin = llvm::BasicBlock::Create(TheContext, "switch_begin", CurrFunction);
+    auto switch_cont = llvm::BasicBlock::Create(TheContext, "switch_cont");
 
-    auto switch_new = llvm::BasicBlock::Create(TheContext, "switch_new", CurrFunction);
+    Builder.SetInsertPoint(switch_begin);
+    switch_inst.push_back(Builder.CreateSwitch(switchexpr_val.val, switch_cont));
+    ENTER_LABEL_BLOCK(LabelValues);     // need to pop these after generating code for switch_stmt
 
-    Builder.SetInsertPoint(switch_new);
-    // TODO: finish this code generation
+    push_break(switch_cont);
+    stmt_codegen(switch_stmt);
+    llvm::BasicBlock *def_bb = GET_DEF_FROM_TOP(LabelValues);
+    if (def_bb) {
+        switch_inst.back()->setDefaultDest(def_bb);
+    }
+    if (switch_cont->getNumUses() > 0) {
+        Builder.CreateBr(switch_cont);
+        CurrFunction->getBasicBlockList().push_back(switch_cont);
+        Builder.SetInsertPoint(switch_cont);
+    }
+
+    switch_inst.pop_back();
+    pop_break();
+    POP_LABEL_BLOCK(LabelValues);
 }
 
 // iteration statement
@@ -1393,6 +1436,7 @@ void whilestmt_codegen(struct _ast_node *while_stmt) {
             return;
         }
     }
+    zero_val = ZERO_VAL;
 
     cond_val = binop_codegen(cond_val, zero_val, NODE_TYPE::NEQOP, false);
     llvm::BasicBlock *body_bb = llvm::BasicBlock::Create(TheContext, "while_body", CurrFunction);
@@ -1438,6 +1482,7 @@ void dowhilestmt_codegen(struct _ast_node *dowhile_stmt) {
     Builder.SetInsertPoint(cond_bb);
 
     value_llvm cond_val = expression_codegen(cond);
+    zero_val = ZERO_VAL;
     cond_val = binop_codegen(cond_val, zero_val, NODE_TYPE::NEQOP, false);
     Builder.CreateCondBr(cond_val.val, body_bb, merge_bb);
 
@@ -1523,10 +1568,10 @@ void return_codegen(struct _ast_node *ret_stmt) {
     llvm::Type *retty = CurrFunction->getReturnType();
     
     if (retty->isVoidTy() && ret_expr) {
-        fprintf(stderr, "`return` with a value, in function returning void\n");
+        fprintf(stderr, "`return` with a value, in function `%s` which returns void\n", CurrFunction->getName().str().c_str());
         exit(1);
     } else if (!retty->isVoidTy() && !ret_expr) {
-        fprintf(stderr, "`return` with no value, in function returning non-void\n");
+        fprintf(stderr, "`return` with no value, in function `%s` which returns non-void\n", CurrFunction->getName().str().c_str());
         exit(1);
     }
 
@@ -1539,7 +1584,7 @@ void return_codegen(struct _ast_node *ret_stmt) {
         // RETURN_STMT1
         Builder.CreateRetVoid();
     }
-
+    
     llvm::BasicBlock *retend_bb = llvm::BasicBlock::Create(TheContext, "ret_end", CurrFunction);
     Builder.SetInsertPoint(retend_bb);
 }
@@ -1585,7 +1630,7 @@ void print_module(struct _ast_node *root, std::string &out_filename) {
     std::error_code err;
     llvm::raw_fd_ostream file(out_filename, err);
     if (err) {
-      printf("error occurred in opening file: %s\n", err.message().c_str());
+      printf("error: couldn't open file : %s\n", err.message().c_str());
       exit(1);
     }
     TheModule->print(file, nullptr);
