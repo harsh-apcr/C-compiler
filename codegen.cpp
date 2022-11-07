@@ -124,9 +124,9 @@ int intcast_type(value_llvm &value, type_llvm type) {
     }
     bool is_signed = value.ty.is_signed;
     if (is_signed)
-        value.val = Builder.CreateSExtOrTrunc(value.val, ty2);
+        value.val = Builder.CreateSExtOrTrunc(value.val, ty2, value.val->getName().str() + "cast");
     else
-        value.val = Builder.CreateZExtOrTrunc(value.val, ty2);
+        value.val = Builder.CreateZExtOrTrunc(value.val, ty2, value.val->getName().str() + "cast");
     // type of val has been changed accordingly
     value.ty.is_signed = type.is_signed;
     value.ty.Ty = value.val->getType(); // update ty as well
@@ -297,19 +297,19 @@ void make_common_type(value_llvm &val1, value_llvm &val2) {
     
     
     if (val1.ty.is_signed) {
-    val1.val = Builder.CreateSExtOrTrunc(val1.val, common_type.Ty);
+    val1.val = Builder.CreateSExtOrTrunc(val1.val, common_type.Ty, val1.val->getName().str() + "cast");
     val1.ty.Ty = val1.val->getType();
     } else {
-        val1.val = Builder.CreateZExtOrTrunc(val1.val, common_type.Ty);
+        val1.val = Builder.CreateZExtOrTrunc(val1.val, common_type.Ty, val1.val->getName().str() + "cast");
         val1.ty.Ty = val1.val->getType();
     }
     
     
     if (val2.ty.is_signed) {
-    val2.val = Builder.CreateSExtOrTrunc(val2.val, common_type.Ty);
+    val2.val = Builder.CreateSExtOrTrunc(val2.val, common_type.Ty, val2.val->getName().str() + "cast");
     val2.ty.Ty = val2.val->getType();
     } else {
-        val2.val = Builder.CreateZExtOrTrunc(val2.val, common_type.Ty);
+        val2.val = Builder.CreateZExtOrTrunc(val2.val, common_type.Ty, val2.val->getName().str() + "cast");
         val2.ty.Ty = val2.val->getType();
     }
     
@@ -319,8 +319,8 @@ void make_common_type(value_llvm &val1, value_llvm &val2) {
 inline void convert_bool(value_llvm &val) {
     zero_val = ZERO_VAL;
     make_common_type(val, zero_val);
-    val.val = Builder.CreateICmpNE(val.val, zero_val.val);
-    val.val = Builder.CreateZExtOrBitCast(val.val, llvm::IntegerType::get(TheContext, 32));
+    val.val = Builder.CreateICmpNE(val.val, zero_val.val, val.val->getName().str() + "cast");
+    val.val = Builder.CreateZExtOrBitCast(val.val, llvm::IntegerType::get(TheContext, 32), val.val->getName().str() + "cast");
     val.ty = type_llvm(llvm::IntegerType::get(TheContext, 32));
 }
 
@@ -480,7 +480,7 @@ value_llvm string_codegen(struct _ast_node *string_node) {
     }
     llvm::GlobalVariable *str = Builder.CreateGlobalString(string_node->node_val, "str_const");
     std::vector<llvm::Value *> indices{ZERO_VAL, ZERO_VAL};
-    llvm::Value *ptr = Builder.CreateInBoundsGEP(str, indices);
+    llvm::Value *ptr = Builder.CreateInBoundsGEP(str, indices, "strgep");
     return value_llvm(ptr, type_llvm(ptr->getType(), true)); // assumed to be `signed char*`
 }
 
@@ -546,7 +546,7 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op, bo
             fprintf(stderr, "error: couldn't do comparision on floats\n");
             exit(1);
         }
-        return i1toi32 ? value_llvm(Builder.CreateZExtOrBitCast(cmp_ret.val, Builder.getInt32Ty()), 
+        return i1toi32 ? value_llvm(Builder.CreateZExtOrBitCast(cmp_ret.val, Builder.getInt32Ty(), "cmpcast"), 
                                     type_llvm(llvm::Type::getInt32Ty(TheContext), true)) :
                         cmp_ret;
     } else {
@@ -577,7 +577,7 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op, bo
                 cmp_op = is_signed ? llvm::CmpInst::Predicate::ICMP_SLT : llvm::CmpInst::Predicate::ICMP_ULT;
                 cmp_ret = Builder.CreateICmp(cmp_op, lhs.val, rhs.val, "ilttemp");
                 if (i1toi32) {
-                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty);
+                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty, "ltcast");
                 } else {
                     retval.ty.Ty = llvm::Type::getInt1Ty(TheContext);
                     retval.val = cmp_ret;
@@ -587,7 +587,7 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op, bo
                 cmp_op = is_signed ? llvm::CmpInst::Predicate::ICMP_SGT : llvm::CmpInst::Predicate::ICMP_UGT;
                 cmp_ret = Builder.CreateICmp(cmp_op, lhs.val, rhs.val, "igttemp");
                 if (i1toi32) {
-                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty);
+                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty, "gtcast");
                 } else {
                     retval.ty.Ty = llvm::Type::getInt1Ty(TheContext);
                     retval.val = cmp_ret;
@@ -597,7 +597,7 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op, bo
                 cmp_op = is_signed ? llvm::CmpInst::Predicate::ICMP_SLE : llvm::CmpInst::Predicate::ICMP_ULE;
                 cmp_ret = Builder.CreateICmp(cmp_op, lhs.val, rhs.val, "iletemp");
                 if (i1toi32) {
-                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty);
+                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty, "lecast");
                 } else {
                     retval.ty.Ty = llvm::Type::getInt1Ty(TheContext);
                     retval.val = cmp_ret;
@@ -607,7 +607,7 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op, bo
                 cmp_op = is_signed ? llvm::CmpInst::Predicate::ICMP_SGE : llvm::CmpInst::Predicate::ICMP_UGE;
                 cmp_ret = Builder.CreateICmp(cmp_op, lhs.val, rhs.val, "igetemp");
                 if (i1toi32) {
-                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty);
+                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty, "gecast");
                 } else {
                     retval.ty.Ty = llvm::Type::getInt1Ty(TheContext);
                     retval.val = cmp_ret;
@@ -616,7 +616,7 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op, bo
             case EQOP:
                 cmp_ret = Builder.CreateICmpEQ(lhs.val, rhs.val, "ieqtemp");
                 if (i1toi32) {
-                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty);
+                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty, "eqcast");
                 } else {
                     retval.ty.Ty = llvm::Type::getInt1Ty(TheContext);
                     retval.val = cmp_ret;
@@ -625,7 +625,7 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op, bo
             case NEQOP:
                 cmp_ret = Builder.CreateICmpNE(lhs.val, rhs.val, "inetemp");
                 if (i1toi32) {
-                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty);
+                    retval.val = Builder.CreateZExtOrBitCast(cmp_ret, retval.ty.Ty, "necast");
                 } else {
                     retval.ty.Ty = llvm::Type::getInt1Ty(TheContext);
                     retval.val = cmp_ret;
@@ -653,54 +653,9 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op, bo
 
             // logical operators here, convert lhs/rhs value to 0 or 1 via comparison and then do bitand/bitor
             case LAND: {
-                auto lhs_constval = llvm::dyn_cast<llvm::Constant>(lhs.val);
-                auto rhs_constval = llvm::dyn_cast<llvm::Constant>(rhs.val);
-
-                // if (lhs_constval) {
-                //     if (lhs_constval->isZeroValue()) {
-                //         // retval is ZERO_VAL
-                //         retval.val = llvm::ConstantInt::get(TheContext,
-                //                      llvm::APInt(retval.ty.Ty->getIntegerBitWidth(), 0, retval.ty.is_signed));
-                //         return retval;
-                //     } else {
-                //         // lhs_constval is non zero (or truth)
-                //         if (rhs_constval) {
-                //             goto const_rhs;
-                //         }
-                //         else {
-                //             // rhs is not constant
-                //             Builder.CreateStore(rhs.val, retval.val);
-                //             return retval;
-                //         }
-                //     }
-                // }
-                // if (rhs_constval) {
-                //     const_rhs:
-                //     if (rhs_constval->isZeroValue()) {
-                //         // retval is ZERO_VAL
-                //         retval.val = llvm::ConstantInt::get(TheContext,
-                //                      llvm::APInt(retval.ty.Ty->getIntegerBitWidth(), 0, retval.ty.is_signed));
-                //         return retval;
-                //     } else {
-                //         // rhs is NON_ZERO_VAL, just load and store lhs.val
-                //         if (lhs_constval) {
-                //             // control flow must've already gone through above `if (lhs_constval)` and thus its value cannot be zero
-                //             // rhs is also constant and its value is not zero
-                //             retval.val = llvm::ConstantInt::get(TheContext,
-                //                      llvm::APInt(retval.ty.Ty->getIntegerBitWidth(), 1, retval.ty.is_signed));
-                //             return retval;
-                //         } else {
-                //             // lhs is not constant and rhs is constant with value 1
-                //             Builder.CreateStore(lhs.val, retval.val);
-                //             return retval;
-                //         }
-                //     }
-                // }
-
                 // both lhs and rhs are not constant
                 convert_bool(lhs);
-                convert_bool(rhs);
-                
+                convert_bool(rhs);           
 
                 retval.val = Builder.CreateAnd(lhs.val, rhs.val, "landtemp");
                 return retval;
@@ -708,9 +663,6 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op, bo
             case LOR: {
                 convert_bool(lhs);
                 convert_bool(rhs);
-                // auto lhs_constval = llvm::dyn_cast<llvm::Constant>(lhs.val);
-                // auto rhs_constval = llvm::dyn_cast<llvm::Constant>(rhs.val);
-
 
                 retval.val = Builder.CreateOr(lhs.val, rhs.val, "lortemp");   
                 return retval;
@@ -1344,6 +1296,10 @@ void function_def_codegen(struct _ast_node *root) {
     LabelTable.clear();
     NotFoundLabels.clear();
     CurrFunction = nullptr;
+    llvm::BasicBlock *end_blk = Builder.GetInsertBlock();
+    if (end_blk->empty()) {
+        end_blk->eraseFromParent();
+    }
     llvm::verifyFunction(*TheFunction);
 }
 
@@ -1535,18 +1491,20 @@ void ifelsestmt_codegen(struct _ast_node *ifelse_stmt) {
 
     // deadcode elimination optimization
     auto const_cond_val = llvm::dyn_cast<llvm::Constant>(cond_val.val);
-    if ((const_cond_val && !has_labeled_stmt(thenstmt) 
-        && (!elsestmt || !has_labeled_stmt(elsestmt)))) {
-            // cond_val is constant && then has no labeled statement && no else_stmt 
-            // or cond_val is constant && then has no labeled statement && else_stmt has no labels
+    if (const_cond_val) {
         if (const_cond_val->isZeroValue()) {
-            if (!elsestmt) return;
-            else
-                stmt_codegen(elsestmt);
+            if (!has_labeled_stmt(thenstmt)) {
+                if (elsestmt)
+                    stmt_codegen(elsestmt);
+                return;
+            }
         } else {
-            stmt_codegen(thenstmt);
+            // non zero value
+            if (!has_labeled_stmt(elsestmt)) {
+                stmt_codegen(thenstmt);
+                return;
+            }
         }
-        return;
     }
     zero_val = ZERO_VAL;
     cond_val = binop_codegen(cond_val, zero_val, NODE_TYPE::NEQOP, false);
@@ -1590,10 +1548,10 @@ void switchstmt_codegen(struct _ast_node *switchstmt) {
     struct _ast_node *switch_stmt = switchstmt->children[1];   // statement
 
     value_llvm switchexpr_val = expression_codegen(switch_expr);
-    auto switch_begin = llvm::BasicBlock::Create(TheContext, "switch_begin", CurrFunction);
+    // auto switch_begin = llvm::BasicBlock::Create(TheContext, "switch_begin", CurrFunction);
     auto switch_cont = llvm::BasicBlock::Create(TheContext, "switch_cont");
 
-    Builder.SetInsertPoint(switch_begin);
+    // Builder.SetInsertPoint(switch_begin);
     switch_inst.push_back(Builder.CreateSwitch(switchexpr_val.val, switch_cont));
     ENTER_LABEL_BLOCK(LabelValues);     // need to pop these after generating code for switch_stmt
 
