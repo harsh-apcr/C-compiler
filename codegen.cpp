@@ -117,31 +117,89 @@ llvm::AllocaInst *CreateVariableAlloca(type_llvm ty, const std::string &VarName)
 }
 
 int intcast_type(value_llvm &value, type_llvm type) {
-    auto ty1 = llvm::dyn_cast<llvm::IntegerType>(value.val->getType());
-    auto ty2 = llvm::dyn_cast<llvm::IntegerType>(type.Ty);    
-    if (!ty1 || !ty2) {
-        return 1;
+    if (value.ty.Ty->isFloatingPointTy()) {
+        bool is_signed = type.is_signed;
+        if (is_signed) 
+            value.val = Builder.CreateFPToSI(value.val, type.Ty, value.val->getName().str() + "_fptosi");
+        else
+            value.val = Builder.CreateFPToUI(value.val, type.Ty, value.val->getName().str() + "_fptoui");
+        if (!value.val) return 1;
+        value.ty.Ty = value.val->getType();
+        return 0;
     }
+    if (value.ty.Ty->isIntegerTy()) {
+        auto ty1 = llvm::dyn_cast<llvm::IntegerType>(value.val->getType());
+        auto ty2 = llvm::dyn_cast<llvm::IntegerType>(type.Ty);    
+        if (!ty1 || !ty2) {
+            return 1;
+        }
+        bool is_signed = value.ty.is_signed;
+        if (is_signed)
+            value.val = Builder.CreateSExtOrTrunc(value.val, ty2, value.val->getName().str() + "_cast");
+        else
+            value.val = Builder.CreateZExtOrTrunc(value.val, ty2, value.val->getName().str() + "_cast");
+        // type of val has been changed accordingly
+        value.ty.is_signed = type.is_signed;
+        value.ty.Ty = value.val->getType(); // update ty as well
+        return 0;
+    }
+    return 1;
+}
+
+int floatcast_type(value_llvm &value, type_llvm type) {
+    if ((value.val->getType()->isFloatTy() && type.Ty->isFloatTy()) ||
+        (value.val->getType()->isDoubleTy() && type.Ty->isDoubleTy())) 
+        return 0;    // already the same type, no type casting needed
     bool is_signed = value.ty.is_signed;
-    if (is_signed)
-        value.val = Builder.CreateSExtOrTrunc(value.val, ty2, value.val->getName().str() + "cast");
-    else
-        value.val = Builder.CreateZExtOrTrunc(value.val, ty2, value.val->getName().str() + "cast");
-    // type of val has been changed accordingly
-    value.ty.is_signed = type.is_signed;
-    value.ty.Ty = value.val->getType(); // update ty as well
-    return 0;
+    if (value.val->getType()->isIntegerTy()) {
+        // int to float/double
+        if (is_signed) 
+            value.val = Builder.CreateUIToFP(value.val, type.Ty, value.val->getName().str() + "_uitofp");
+        else
+            value.val = Builder.CreateSIToFP(value.val, type.Ty, value.val->getName().str() + "_sitofp");
+        if (!value.val) return 1;
+        value.ty.Ty = value.val->getType();
+        return 0;
+    }
+    // double to float trunc
+    if (value.val->getType()->isDoubleTy() && type.Ty->isFloatTy()) {
+        value.val = Builder.CreateFPTrunc(value.val, llvm::Type::getFloatTy(TheContext),
+                                         value.val->getName().str() + "_ftrunc");
+        if (!value.val) return 1;
+        value.ty.Ty = value.val->getType();
+        return 0;
+    } 
+    // float to double ext
+    if (value.val->getType()->isFloatTy() && type.Ty->isDoubleTy()) {
+        value.val = Builder.CreateFPExt(value.val, llvm::Type::getDoubleTy(TheContext),
+                                         value.val->getName().str() + "_fext");
+        if (!value.val) return 1;
+        value.ty.Ty = value.val->getType();
+        return 0;
+    }
+    return 1;
 }
 
 // to = from -> to = (to) from  // typecast `from` value to `to` value
 value_llvm store_codegen(std::string idname, value_llvm from) {
     value_llvm tostore = find_symbol(NamedValues, idname);
     assert(tostore.val);
-    if (intcast_type(from, tostore.ty) == 1) {
-        if (!CurrFunction)
-            fprintf(stderr, "warning: potential type mismatch while assigning to `%s`\n      this warning will always appear if assigned types are not integers\n", idname.c_str());
-        else
-            fprintf(stderr, "warning: potential type mismatch while assigning to `%s` in function `%s`\n      this warning will always appear if assigned types are not integers\n", idname.c_str(), CurrFunction->getName().str().c_str());
+    if (tostore.ty.Ty->isIntegerTy()) {
+        if (intcast_type(from, tostore.ty) == 1) {
+            if (!CurrFunction) {
+                fprintf(stderr, "warning: potential type mismatch while assigning to `%s`\nnote: this warning may appear if assigned types are not integer or float\n", idname.c_str());
+            } else {
+                fprintf(stderr, "warning: potential type mismatch while assigning to `%s` in function `%s`\nnote: this warning may appear if assigned types are not integer or float\n", idname.c_str(), CurrFunction->getName().str().c_str());
+            }
+        }
+    }
+    if (tostore.ty.Ty->isFloatingPointTy()) {
+        if (floatcast_type(from, tostore.ty) == 1) {
+            if (!CurrFunction)
+                fprintf(stderr, "warning: potential type mismatch while assigning to `%s`\nnote: this warning may appear if assigned types are not integer or float\n", idname.c_str());
+            else
+                fprintf(stderr, "warning: potential type mismatch while assigning to `%s` in function `%s`\nnote: this warning may appear if assigned types are not integer or float\n", idname.c_str(), CurrFunction->getName().str().c_str());
+        }
     }
     Builder.CreateStore(from.val, tostore.val);
     return from;
@@ -273,8 +331,44 @@ type_llvm get_type(struct _ast_node *decl_spec, struct _ast_node *ptr) {
     return ty;
 }
 
+void make_common_ftype(value_llvm &val1, value_llvm &val2) {
+    if (val1.ty.Ty->isFloatingPointTy()) {
+        if (val2.ty.Ty->isIntegerTy()) {
+            floatcast_type(val2, val1.ty);
+            return;
+        }
+        if (val2.ty.Ty->isFloatingPointTy()) {
+            if (val1.ty.Ty->isDoubleTy() && val2.ty.Ty->isFloatTy()) {
+                floatcast_type(val2, val1.ty);
+                return;
+            }
+            if (val1.ty.Ty->isFloatTy() && val2.ty.Ty->isDoubleTy()) {
+                floatcast_type(val1, val2.ty);
+                return;
+            }
+        }
+        // val2 is neither integer nor floating point type
+        fprintf(stderr, "warning: unexpected type being operated with floats\n");
+        return;
+    }
+    if (val2.ty.Ty->isFloatingPointTy()) {
+        // val1 is not floating point ty
+        if (!val1.ty.Ty->isIntegerTy()) {
+            fprintf(stderr, "warning: unexpected type being operated with floats\n");
+            return;
+        } else {
+            // integer type
+            floatcast_type(val1, val2.ty);
+            return;
+        }
+    }
+    fprintf(stderr, "warning: unexpected type for binary operation\n");
+    return;
+}
+
+
 // assert: val1 and val2 are both some form of integer types
-void make_common_type(value_llvm &val1, value_llvm &val2) {
+void make_common_itype(value_llvm &val1, value_llvm &val2) {
     auto ty1 = llvm::dyn_cast<llvm::IntegerType>(val1.val->getType());
     auto ty2 = llvm::dyn_cast<llvm::IntegerType>(val2.val->getType());    
     assert(ty1 && "only integer type conversion allowed");
@@ -318,7 +412,7 @@ void make_common_type(value_llvm &val1, value_llvm &val2) {
 
 inline void convert_bool(value_llvm &val) {
     zero_val = ZERO_VAL;
-    make_common_type(val, zero_val);
+    make_common_itype(val, zero_val);
     val.val = Builder.CreateICmpNE(val.val, zero_val.val, val.val->getName().str() + "cast");
     val.val = Builder.CreateZExtOrBitCast(val.val, llvm::IntegerType::get(TheContext, 32), val.val->getName().str() + "cast");
     val.ty = type_llvm(llvm::IntegerType::get(TheContext, 32));
@@ -498,6 +592,7 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op, bo
     
     if (!lhs.val->getType()->isIntegerTy() || !rhs.val->getType()->isIntegerTy()) {
         // lhs or rhs is a float/double type
+        make_common_ftype(lhs, rhs);
         value_llvm cmp_ret;
         switch(op) {
             case MULT:
@@ -552,7 +647,7 @@ value_llvm binop_codegen(value_llvm &lhs, value_llvm &rhs, enum NODE_TYPE op, bo
     } else {
         // both lhs and rhs are int type
         // before doing any operation on them, need to convert them into same type for any llvm-opcode
-        make_common_type(lhs, rhs);
+        make_common_itype(lhs, rhs);
         value_llvm retval;
         retval.ty = type_llvm(lhs.val->getType(), lhs.ty.is_signed && rhs.ty.is_signed);
         bool is_signed = retval.ty.is_signed;
@@ -983,7 +1078,11 @@ value_llvm ternop_codegen(struct _ast_node *expr) {
     // emit the merge block
     CurrFunction->getBasicBlockList().push_back(merge_bb);
     Builder.SetInsertPoint(merge_bb);
-    make_common_type(then_val, else_val); // then and else expression must be able to cast into some common type
+    if (!then_val.ty.Ty->isIntegerTy() || !else_val.ty.Ty->isIntegerTy()) {
+        make_common_ftype(then_val, else_val);
+    } else {
+        make_common_itype(then_val, else_val);
+    }
 
     llvm::PHINode *phi_node = Builder.CreatePHI(then_val.val->getType(), 2, "merge_phi");
     phi_node->addIncoming(then_val.val, then_bb);
@@ -1101,7 +1200,7 @@ std::vector<value_llvm> initdecl_list_codegen(struct _ast_node *init_decl_list, 
                     }
                 } else {
                     // local variable declaration
-                    Builder.CreateStore(initializer_value.val, declarator_value.val);
+                    store_codegen(declarator->children[0]->children[0]->node_val, initializer_value);
                     vals.push_back(declarator_value);
                 }
             }
@@ -1176,6 +1275,10 @@ value_llvm function_call_codegen(struct _ast_node *func_call) {
 
 // get return type of function_decl from DECL node (you cannot get it from function_decl)
 function_llvm function_decl_codegen(struct _ast_node *fun_decl, type_llvm retty) {
+    if (fun_decl->node_type == FUNCTION_PTRDECL) {
+        fprintf(stderr, "error: function declarations are not supported\n");
+        exit(1);
+    }
     assert(fun_decl->node_type == FUNCTION_DECL);
     struct _ast_node *param_list = fun_decl->children[1];   // node->type == PARAM_LIST
     std::vector<llvm::Type *> paramtypes;
@@ -1285,7 +1388,7 @@ void function_def_codegen(struct _ast_node *root) {
 
     if (strncmp(insert_blk->getName().str().c_str(), "ret_end", 7 * sizeof(char))) {
         if (!rettype.Ty->isVoidTy()) {
-            fprintf(stderr, "warning : No return statement at the end in non void function `%s`\n", CurrFunction->getName().str().c_str());
+            fprintf(stderr, "warning : No return statement at the end in non void function `%s`\nnote: you may ignore this warning if you've ensured that all the possible execution paths have return statement\n", CurrFunction->getName().str().c_str());
             Builder.CreateRet(llvm::UndefValue::get(TheFunction->getReturnType())); // returns unspecified bit pattern
         } else {
             Builder.CreateRetVoid();
