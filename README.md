@@ -9,12 +9,21 @@ http://www.quut.com/c/ANSI-C-grammar-y-2011.html
 1. Open the terminal and cd into the source code directory
 2. type make to compile all the source code
 3. run the binary cc which has the following usage (\<outfile.ll\> is optional and if not provided default filename would be `a.ll`)
-    * Usage: ./cc <\prog.c\>  -dumpast
-    *        ./cc <\prog.c\>  -scopechk
-    *        ./cc <\prog.c\>  -emit-ir [<outfile.ll>]
+    ```bash
+     Usage: ./cc <prog.c>  -dumpast
+            ./cc <prog.c>  -scopechk
+            ./cc <prog.c>  -emit-ir [<outfile.ll>]
+    ```
 4. NOTE : this program doesn't exhaustively support all C constructs but supports most of them and you'll get appropriate warnings/error for invalid/unsupported programs
 5. some sample programs are also provided (in examples directory) to test the AST implementation
 6. their corresponding sample output is in `out/` directory
+
+Example :
+emit code for `hello_world.c` program in examples dir into `out/` dir
+
+`./cc examples/hello_world.c -emit-ir out/a.ll`
+
+resulting `a.ll` can be compiled using `llc` and run using `lli`
 
 ## Supported Types
 
@@ -27,6 +36,7 @@ http://www.quut.com/c/ANSI-C-grammar-y-2011.html
 ## Supported C constructs
 * All the declarations/expressions are supported
 * Among the control-flow statements, except for-loop all the C statements are supported (i.e. `if-else`, `while`, `do-while`, `switch statements`, `case and default statements`, `labeled statements and gotos`, `break`, `continue`, `return` etc.)
+* old C style for loop is supported for scope checking
 * Gracefull exiting of invalid C program is supported (i.e. proper error mentioning during codegen/scope checking)
 * Any construct that is not supported you'll get an appropriate error message for it
 
